@@ -19,7 +19,7 @@ class Slingshot():
         self.cluster_labels = self.cluster_labels_onehot.argmax(axis=1)
         self.num_clusters = self.cluster_labels.max() + 1
         self.start_node = start_node
-        cluster_centres = [data[self.cluster_labels == k].mean(dim=0) for k in range(self.num_clusters)]
+        cluster_centres = [data[self.cluster_labels == k].mean(axis=0) for k in range(self.num_clusters)]
         self.cluster_centres = np.stack(cluster_centres)
         self.lineages = None
         self.branch_clusters = None
@@ -74,7 +74,7 @@ class Slingshot():
 
     def get_lineages(self):
         # Calculate empirical covariance of clusters
-        emp_covs = np.stack([np.cov(self.data[self.cluster_labels == i].t()) for i in range(self.num_clusters)])
+        emp_covs = np.stack([np.cov(self.data[self.cluster_labels == i].T) for i in range(self.num_clusters)])
         dists = np.zeros((self.num_clusters, self.num_clusters))
         for i in range(self.num_clusters):
             for j in range(i, self.num_clusters):
