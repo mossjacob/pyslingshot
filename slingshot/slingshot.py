@@ -7,13 +7,14 @@ from scipy.sparse.csgraph import minimum_spanning_tree
 from sklearn.neighbors import KernelDensity
 from scipy.interpolate import interp1d
 from collections import deque
+from tqdm import tqdm
 
 from .util import scale_to_range, mahalanobis
 from .lineage import Lineage
 
 
 class Slingshot():
-    def __init__(self, data, cluster_labels, start_node=0, debug=None):
+    def __init__(self, data, cluster_labels, start_node=0, debug_axes=None, debug_level=None):
         self.data = data
         self.cluster_labels_onehot = cluster_labels
         self.cluster_labels = self.cluster_labels_onehot.argmax(axis=1)
@@ -23,8 +24,12 @@ class Slingshot():
         self.cluster_centres = np.stack(cluster_centres)
         self.lineages = None
         self.branch_clusters = None
-        if debug is not None:
-            self.debug_axes = debug
+        if debug_axes is not None:
+            self.debug_axes = debug_axes
+        self.debug_plot_lineages = debug_axes is not None
+        self.debug_plot_avg = debug_axes is not None
+        debug_level = 0 if debug_level is None else dict(verbose=1)[debug_level]
+        self.debug_level = debug_level
 
         # Construct smoothing kernel for the shrinking step
         self.kernel_x = np.linspace(-3, 3, 512)
@@ -57,7 +62,7 @@ class Slingshot():
                     queue.append(child)
         return children
 
-    def plot_clusters(self, ax, s=8, alpha=1):
+    def plot_clusters(self, ax, s=8, alpha=1.):
         # Plot clusters and start cluster
         colors = np.array(sns.color_palette())
         ax.scatter(self.data[:, 0], self.data[:, 1],
@@ -119,6 +124,7 @@ class Slingshot():
 
         lineages = recurse_branches([], self.start_node)
         lineages = list(flatten(lineages))
+        if self.debug_level > 0:
         print('Lineages:', lineages)
         self.lineages = lineages
         self.branch_clusters = branch_clusters
@@ -133,16 +139,14 @@ class Slingshot():
         cell_weights = self.calculate_cell_weights(distances)
 
         # Ensure starts at 0
-        for l_idx, lineage in enumerate(self.lineages):
-            min_time = np.min(curves[l_idx].pseudotimes_interp[cell_weights[:, l_idx] > 0])
-            curves[l_idx].pseudotimes_interp -= min_time
-            # axes[1, 0].scatter(p.p_interp[ind, 0], p.p_interp[ind, 1], label=str(lineage), c=p.s_interp[ind])
-            # print(lineage, 'min, max', s_interps[l_idx].min(), s_interps[l_idx].max())
-        self.debug_axes[0, 1].legend()
+            for l_idx, lineage in enumerate(self.lineages):
+                min_time = np.min(curves[l_idx].pseudotimes_interp[cell_weights[:, l_idx] > 0])
+                curves[l_idx].pseudotimes_interp -= min_time
 
-        # Determine average curves
-        shrinkage_percentages, cluster_children, cluster_avg_curves =\
+            # Determine average curves
+            shrinkage_percentages, cluster_children, cluster_avg_curves =\
             self.avg_curves(curves, cluster_lineages, cell_weights)
+            self.debug_axes[1, 0].legend()
 
         # Shrink towards average curves in areas of cells common to all branch lineages
         self.shrink_curves(cluster_children, shrinkage_percentages, cluster_avg_curves)
@@ -243,7 +247,11 @@ class Slingshot():
         lineage_avg_curves = dict()
         cluster_avg_curves = dict()
         branch_clusters = self.branch_clusters.copy()
-        print('Reversing from leaf to root')
+        if self.debug_level > 0:
+            print('Reversing from leaf to root')
+        if self.debug_plot_avg:
+            self.plot_clusters(self.debug_axes[1, 0], s=4, alpha=0.4)
+
         while len(branch_clusters) > 0:
             # Starting at leaves, find lineages involved in branch
             k = branch_clusters.pop()
@@ -258,7 +266,8 @@ class Slingshot():
 
             # Calculate the average curve for this branch
             branch_curves = list(cluster_children[k])
-            print(f'Averaging branch @{k} with lineages:', branch_lineages, branch_curves)
+            if self.debug_level > 0:
+                print(f'Averaging branch @{k} with lineages:', branch_lineages, branch_curves)
             #branch_lineages, curves
             avg_curve = self.avg_branch_curves(branch_curves)
             cluster_avg_curves[k] = avg_curve
@@ -319,7 +328,8 @@ class Slingshot():
             shrinkage_percent = shrinkage_percentages.pop()
             branch_curves = list(cluster_children[k])
             cluster_avg_curve = cluster_avg_curves[k]
-            print(f'Shrinking branch @{k} with curves:', branch_curves)
+            if self.debug_level > 0:
+                print(f'Shrinking branch @{k} with curves:', branch_curves)
 
             # Specify the avg curve for this branch
             self.shrink_branch_curves(branch_curves, cluster_avg_curve, shrinkage_percent)
@@ -349,16 +359,15 @@ class Slingshot():
                     bounds_error=False,
                     fill_value='extrapolate')
                 avg = lin_interpolator(s_interp[order])
-                print('shrinking dimension ', j, 'avg orig pct shapes:', avg.shape, orig.shape, pct.shape)
                 shrunk_curve[:, j] = (avg * pct + orig * (1 - pct))
 
             # w <- pcurve$w
             # pcurve = project_to_curve(X, as.matrix(s[pcurve$ord, ,drop = FALSE]), stretch = stretch)
             # pcurve$w <- w
-            self.debug_axes[1, 1].plot(
-                shrunk_curve[:, 0],
-                shrunk_curve[:, 1],
-                label='shrunk', alpha=0.2)
+            # self.debug_axes[1, 1].plot(
+            #     shrunk_curve[:, 0],
+            #     shrunk_curve[:, 1],
+            #     label='shrunk', alpha=0.2, c='black')
             s_interp, p_interp, d_sq = PrincipalCurve().project_to_curve(
                 self.data, shrunk_curve)
             order = s_interp.argsort()
@@ -412,7 +421,6 @@ class Slingshot():
         # 1. Interpolate all the lineages over the shared time domain
         branch_s_interps = np.stack([c.pseudotimes_interp for c in branch_curves], axis=1)
         max_shared_pseudotime = branch_s_interps.max(axis=0).min()  # take minimum of maximum pseudotimes for each lineage
-        print('max shared', max_shared_pseudotime)
         combined_pseudotime = np.linspace(0, max_shared_pseudotime, num_cells)
         curves_dense = list()
         for curve in branch_curves:
@@ -429,19 +437,16 @@ class Slingshot():
             curves_dense.append(lineage_curve)
 
         curves_dense = np.stack(curves_dense, axis=1)  # (n, L_b, J)
-        print('dense:', curves_dense.shape)
 
         # 2. Average over these curves and project the data onto the result
         avg = curves_dense.mean(axis=1)  # avg is already "sorted"
-        print('avg:', avg.shape)
-        self.plot_clusters(self.debug_axes[1, 0], s=4, alpha=0.4)
-        self.debug_axes[1, 0].plot(avg[:, 0], avg[:, 1], c='blue', linestyle='--', label='average', alpha=0.7)
         s_interp, p_interp, d_sq = PrincipalCurve().project_to_curve(self.data, avg)
         s_interp -= s_interp.min()
-
         order = s_interp.argsort()
-        self.debug_axes[1, 0].plot(p_interp[order, 0], p_interp[order, 1], c='red', label='data projected', alpha=0.7)
-        self.debug_axes[1, 0].legend()
+
+        if self.debug_plot_avg:
+            self.debug_axes[1, 0].plot(avg[:, 0], avg[:, 1], c='blue', linestyle='--', label='average', alpha=0.7)
+            self.debug_axes[1, 0].plot(p_interp[order, 0], p_interp[order, 1], c='red', label='data projected', alpha=0.7)
 
         return PrincipalCurve.from_params(s_interp, p_interp, order=order)
         #
