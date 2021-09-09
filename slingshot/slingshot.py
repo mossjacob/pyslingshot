@@ -77,6 +77,16 @@ class Slingshot():
         ]
         ax.legend(handles=handles)
 
+    def construct_initial_curves(self):
+        """Constructs lineage principal curves using piecewise linear initialisation"""
+        piecewise_linear = list()
+        for l_idx, lineage in enumerate(self.lineages):
+            # Calculate piecewise linear path
+            p = np.stack(self.cluster_centres[lineage.clusters])
+            s = np.zeros(p.shape[0])  # TODO
+            piecewise_linear.append(PrincipalCurve.from_params(s, p))
+        return piecewise_linear
+
     def get_lineages(self):
         # Calculate empirical covariance of clusters
         emp_covs = np.stack([np.cov(self.data[self.cluster_labels == i].T) for i in range(self.num_clusters)])
@@ -125,43 +135,83 @@ class Slingshot():
         lineages = recurse_branches([], self.start_node)
         lineages = list(flatten(lineages))
         if self.debug_level > 0:
-        print('Lineages:', lineages)
+            print('Lineages:', lineages)
         self.lineages = lineages
         self.branch_clusters = branch_clusters
         return lineages
 
-    def get_curves(self):
+    def get_curves(self, num_epochs=10):
         # Initial curves and pseudotimes:
-        curves, distances, cluster_lineages = self.construct_initial_curves()
+        prev_curves = self.construct_initial_curves()
 
-        # Calculate cell weights
-        # cell weight is a matrix #cells x #lineages indicating cell-lineage assignment
-        cell_weights = self.calculate_cell_weights(distances)
+        for epoch in tqdm(range(num_epochs)):
 
-        # Ensure starts at 0
+            # Fit principal curve using existing curves
+            curves, cluster_lineages, distances = self.fit_curves(prev_curves)
+            self.debug_axes[0, 1].legend()
+
+            # Calculate cell weights
+            # cell weight is a matrix #cells x #lineages indicating cell-lineage assignment
+            cell_weights = self.calculate_cell_weights(distances)
+
+            # Ensure starts at 0
             for l_idx, lineage in enumerate(self.lineages):
                 min_time = np.min(curves[l_idx].pseudotimes_interp[cell_weights[:, l_idx] > 0])
                 curves[l_idx].pseudotimes_interp -= min_time
 
             # Determine average curves
             shrinkage_percentages, cluster_children, cluster_avg_curves =\
-            self.avg_curves(curves, cluster_lineages, cell_weights)
+                self.avg_curves(curves, cluster_lineages, cell_weights)
             self.debug_axes[1, 0].legend()
 
-        # Shrink towards average curves in areas of cells common to all branch lineages
-        self.shrink_curves(cluster_children, shrinkage_percentages, cluster_avg_curves)
-        self.plot_clusters(self.debug_axes[1, 1], s=2)
-        # for _, children in cluster_children.items():
-        #     print('plotting:', children)
-        #     for curve in children:
-        for curve in curves:
-            s_interp, p_interp, order = curve.unpack_params()
-            self.debug_axes[1, 1].plot(
-                p_interp[order, 0],
-                p_interp[order, 1],
-                label='projected',
-                alpha=1)
-            self.debug_axes[1, 1].legend()
+            # Shrink towards average curves in areas of cells common to all branch lineages
+            self.shrink_curves(cluster_children, shrinkage_percentages, cluster_avg_curves)
+            if epoch == num_epochs - 1:
+                self.plot_clusters(self.debug_axes[1, 1], s=2, alpha=0.5)
+                for curve in curves:
+                    s_interp, p_interp, order = curve.unpack_params()
+                    self.debug_axes[1, 1].plot(
+                        p_interp[order, 0],
+                        p_interp[order, 1],
+                        label='projected',
+                        alpha=1)
+                    self.debug_axes[1, 1].legend()
+            prev_curves = curves
+            self.debug_plot_lineages = False
+            self.debug_plot_avg = False
+
+        return prev_curves
+
+    def fit_curves(self, prev_curves):
+        distances = list()
+        curves = list()
+        cluster_lineages = {k: list() for k in range(self.num_clusters)}
+
+        # Calculate principal curves
+        for l_idx, lineage in enumerate(self.lineages):
+            # Find cells involved in lineage
+            cell_mask = np.logical_or.reduce(
+                np.array([self.cluster_labels == k for k in lineage]))
+            cells_involved = self.data[cell_mask]
+            for k in lineage:
+                cluster_lineages[k].append(l_idx)
+
+            p = PrincipalCurve(k=3)  # cubic
+            prev_curve = prev_curves[l_idx]
+            p.fit(cells_involved, p=prev_curve.points_interp[prev_curve.order], max_iter=1)
+
+            if self.debug_plot_lineages:
+                self.debug_axes[0, 1].scatter(cells_involved[:, 0], cells_involved[:, 1], s=2, alpha=0.5)
+                for i in np.random.permutation(cells_involved.shape[0])[:50]:
+                    path_from = (cells_involved[i][0], p.points_interp[i][0])
+                    path_to = (cells_involved[i][1], p.points_interp[i][1])
+                    self.debug_axes[0, 1].plot(path_from, path_to, c='black', alpha=p.pseudotimes_interp[i])
+                self.debug_axes[0, 1].plot(p.points[:, 0], p.points[:, 1], label=str(lineage))
+
+            s_interp, p_interp, d_sq = p.project(self.data)
+            distances.append(d_sq)
+            curves.append(p)
+        return curves, cluster_lineages, distances
 
     def calculate_cell_weights(self, distances):
         """TODO: annotate, this is a translation from R"""
@@ -201,37 +251,6 @@ class Slingshot():
             w0[(z0 > .9) & (w0 < .1)] = 0 # !is.na(Z0) & Z0 > .9 & W0 < .1
             cell_weights[ridx] = w0
         return cell_weights
-
-    def construct_initial_curves(self):
-        """Constructs lineage principal curves using piecewise linear initialisation"""
-        cluster_lineages = {k: list() for k in range(self.num_clusters)}
-        distances = list()
-        curves = list()
-        for l_idx, lineage in enumerate(self.lineages):
-            # Find cells involved in lineage
-            cell_mask = np.logical_or.reduce(
-                np.array([self.cluster_labels == k for k in lineage]))
-            cells_involved = self.data[cell_mask]
-            for k in lineage:
-                cluster_lineages[k].append(l_idx)
-
-            # Calculate piecewise linear path
-            piecewise_linear = np.stack(self.cluster_centres[lineage.clusters])
-
-            # Calculate principal curves
-            p = PrincipalCurve(k=3)  # cubic
-            p.fit(cells_involved, p=piecewise_linear, max_iter=10)
-            self.debug_axes[0, 1].scatter(cells_involved[:, 0], cells_involved[:, 1], s=5)
-            for i in np.random.permutation(cells_involved.shape[0])[:50]:
-                path_from = (cells_involved[i][0], p.points_interp[i][0])
-                path_to = (cells_involved[i][1], p.points_interp[i][1])
-                self.debug_axes[0, 1].plot(path_from, path_to, c='black', alpha=p.pseudotimes_interp[i])
-            self.debug_axes[0, 1].plot(p.points[:, 0], p.points[:, 1], label=str(lineage))
-
-            s_interp, p_interp, d_sq = p.project(self.data)
-            distances.append(d_sq)
-            curves.append(p)
-        return curves, distances, cluster_lineages
 
     def avg_curves(self, curves, cluster_lineages, cell_weights):
         """
