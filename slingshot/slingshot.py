@@ -23,19 +23,22 @@ class Slingshot():
         cluster_centres = [data[self.cluster_labels == k].mean(axis=0) for k in range(self.num_clusters)]
         self.cluster_centres = np.stack(cluster_centres)
         self.lineages = None
+        self.prev_curves = None
         self.branch_clusters = None
-        if debug_axes is not None:
-            self.debug_axes = debug_axes
-        self.debug_plot_lineages = debug_axes is not None
-        self.debug_plot_avg = debug_axes is not None
         debug_level = 0 if debug_level is None else dict(verbose=1)[debug_level]
         self.debug_level = debug_level
+        self._set_debug_axes(debug_axes)
 
         # Construct smoothing kernel for the shrinking step
         self.kernel_x = np.linspace(-3, 3, 512)
         kde = KernelDensity(bandwidth=1., kernel='gaussian')
         kde.fit(np.zeros((self.kernel_x.shape[0], 1)))
         self.kernel_y = np.exp(kde.score_samples(self.kernel_x.reshape(-1, 1)))
+
+    def _set_debug_axes(self, axes):
+        self.debug_axes = axes
+        self.debug_plot_lineages = axes is not None
+        self.debug_plot_avg = axes is not None
 
     def construct_mst(self, dists, start_node):
         tree = minimum_spanning_tree(dists)
@@ -76,6 +79,25 @@ class Slingshot():
             Patch(color=colors[k], label=k) for k in range(self.num_clusters)
         ]
         ax.legend(handles=handles)
+
+    def fit(self, num_epochs=10, debug_axes=None):
+        self._set_debug_axes(debug_axes)
+        if self.prev_curves is None:  # Initial curves and pseudotimes:
+            self.get_lineages()
+            self.prev_curves = self.construct_initial_curves()
+
+        for epoch in tqdm(range(num_epochs)):
+            curves = self.get_curves()
+            if epoch == num_epochs - 1:
+                self.plot_clusters(self.debug_axes[1, 1], s=2, alpha=0.5)
+                for curve in curves:
+                    s_interp, p_interp, order = curve.unpack_params()
+                    self.debug_axes[1, 1].plot(
+                        p_interp[order, 0],
+                        p_interp[order, 1],
+                        label='projected',
+                        alpha=1)
+                    self.debug_axes[1, 1].legend()
 
     def construct_initial_curves(self):
         """Constructs lineage principal curves using piecewise linear initialisation"""
@@ -140,49 +162,37 @@ class Slingshot():
         self.branch_clusters = branch_clusters
         return lineages
 
-    def get_curves(self, num_epochs=10):
-        # Initial curves and pseudotimes:
-        prev_curves = self.construct_initial_curves()
+    def get_curves(self):
+        # Fit principal curve for all lineages using existing curves
+        curves, cluster_lineages, distances = self.fit_lineage_curves()
+        self.debug_axes[0, 1].legend()
 
-        for epoch in tqdm(range(num_epochs)):
+        # Calculate cell weights
+        # cell weight is a matrix #cells x #lineages indicating cell-lineage assignment
+        cell_weights = self.calculate_cell_weights(distances)
 
-            # Fit principal curve using existing curves
-            curves, cluster_lineages, distances = self.fit_curves(prev_curves)
-            self.debug_axes[0, 1].legend()
+        # Ensure starts at 0
+        for l_idx, lineage in enumerate(self.lineages):
+            min_time = np.min(curves[l_idx].pseudotimes_interp[cell_weights[:, l_idx] > 0])
+            curves[l_idx].pseudotimes_interp -= min_time
 
-            # Calculate cell weights
-            # cell weight is a matrix #cells x #lineages indicating cell-lineage assignment
-            cell_weights = self.calculate_cell_weights(distances)
+        # Determine average curves
+        shrinkage_percentages, cluster_children, cluster_avg_curves =\
+            self.avg_curves(curves, cluster_lineages, cell_weights)
+        self.debug_axes[1, 0].legend()
 
-            # Ensure starts at 0
-            for l_idx, lineage in enumerate(self.lineages):
-                min_time = np.min(curves[l_idx].pseudotimes_interp[cell_weights[:, l_idx] > 0])
-                curves[l_idx].pseudotimes_interp -= min_time
+        # Shrink towards average curves in areas of cells common to all branch lineages
+        self.shrink_curves(cluster_children, shrinkage_percentages, cluster_avg_curves)
 
-            # Determine average curves
-            shrinkage_percentages, cluster_children, cluster_avg_curves =\
-                self.avg_curves(curves, cluster_lineages, cell_weights)
-            self.debug_axes[1, 0].legend()
+        self.prev_curves = curves
+        self.debug_plot_lineages = False
+        self.debug_plot_avg = False
 
-            # Shrink towards average curves in areas of cells common to all branch lineages
-            self.shrink_curves(cluster_children, shrinkage_percentages, cluster_avg_curves)
-            if epoch == num_epochs - 1:
-                self.plot_clusters(self.debug_axes[1, 1], s=2, alpha=0.5)
-                for curve in curves:
-                    s_interp, p_interp, order = curve.unpack_params()
-                    self.debug_axes[1, 1].plot(
-                        p_interp[order, 0],
-                        p_interp[order, 1],
-                        label='projected',
-                        alpha=1)
-                    self.debug_axes[1, 1].legend()
-            prev_curves = curves
-            self.debug_plot_lineages = False
-            self.debug_plot_avg = False
+        return self.prev_curves
 
-        return prev_curves
-
-    def fit_curves(self, prev_curves):
+    def fit_lineage_curves(self):
+        """Updates curve using a cubic spline and projection of data"""
+        assert self.lineages is not None
         distances = list()
         curves = list()
         cluster_lineages = {k: list() for k in range(self.num_clusters)}
@@ -197,8 +207,9 @@ class Slingshot():
                 cluster_lineages[k].append(l_idx)
 
             p = PrincipalCurve(k=3)  # cubic
-            prev_curve = prev_curves[l_idx]
+            prev_curve = self.prev_curves[l_idx]
             p.fit(cells_involved, p=prev_curve.points_interp[prev_curve.order], max_iter=1)
+            order = p.order
 
             if self.debug_plot_lineages:
                 self.debug_axes[0, 1].scatter(cells_involved[:, 0], cells_involved[:, 1], s=2, alpha=0.5)
@@ -206,11 +217,11 @@ class Slingshot():
                     path_from = (cells_involved[i][0], p.points_interp[i][0])
                     path_to = (cells_involved[i][1], p.points_interp[i][1])
                     self.debug_axes[0, 1].plot(path_from, path_to, c='black', alpha=p.pseudotimes_interp[i])
-                self.debug_axes[0, 1].plot(p.points[:, 0], p.points[:, 1], label=str(lineage))
-
-            s_interp, p_interp, d_sq = p.project(self.data)
+                self.debug_axes[0, 1].plot(p.points_interp[order, 0], p.points_interp[order, 1], label=str(lineage))
+            s_interp, p_interp, d_sq = p.project_to_curve(self.data, p.points_interp[order])
+            order = s_interp.argsort()
             distances.append(d_sq)
-            curves.append(p)
+            curves.append(PrincipalCurve.from_params(s_interp, p_interp, order=order))
         return curves, cluster_lineages, distances
 
     def calculate_cell_weights(self, distances):
