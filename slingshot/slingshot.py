@@ -127,7 +127,8 @@ class Slingshot():
         tree = self.construct_mst(dists, self.start_node)
 
         # Plot distance matrix, clusters, and MST
-        # axes[0, 0].imshow(dists)
+        # from matplotlib import pyplot as plt
+        # plt.imshow(dists)
         self.plot_clusters(self.debug_axes[0, 0])
         for root, children in tree.items():
             for child in children:
@@ -218,10 +219,9 @@ class Slingshot():
                     path_to = (cells_involved[i][1], p.points_interp[i][1])
                     self.debug_axes[0, 1].plot(path_from, path_to, c='black', alpha=p.pseudotimes_interp[i])
                 self.debug_axes[0, 1].plot(p.points_interp[order, 0], p.points_interp[order, 1], label=str(lineage))
-            s_interp, p_interp, d_sq = p.project_to_curve(self.data, p.points_interp[order])
-            order = s_interp.argsort()
+            curve, d_sq, dist = p._project_to_curve(self.data, p.points_interp[order])
             distances.append(d_sq)
-            curves.append(PrincipalCurve.from_params(s_interp, p_interp, order=order))
+            curves.append(curve)
         return curves, cluster_lineages, distances
 
     def calculate_cell_weights(self, distances):
@@ -398,10 +398,7 @@ class Slingshot():
             #     shrunk_curve[:, 0],
             #     shrunk_curve[:, 1],
             #     label='shrunk', alpha=0.2, c='black')
-            s_interp, p_interp, d_sq = PrincipalCurve().project_to_curve(
-                self.data, shrunk_curve)
-            order = s_interp.argsort()
-            curve.update(s_interp, p_interp, order=order)
+            curve._project_to_curve(self.data, points=shrunk_curve)
             #     for(jj in seq_along(ns)){
             #         n <- ns[jj]
             #         if(grepl('Lineage',n)){
@@ -470,15 +467,16 @@ class Slingshot():
 
         # 2. Average over these curves and project the data onto the result
         avg = curves_dense.mean(axis=1)  # avg is already "sorted"
-        s_interp, p_interp, d_sq = PrincipalCurve().project_to_curve(self.data, avg)
-        s_interp -= s_interp.min()
-        order = s_interp.argsort()
+        avg_curve = PrincipalCurve()
+        avg_curve._project_to_curve(self.data, points=avg)
+        avg_curve.pseudotimes_interp -= avg_curve.pseudotimes_interp.min()
 
         if self.debug_plot_avg:
             self.debug_axes[1, 0].plot(avg[:, 0], avg[:, 1], c='blue', linestyle='--', label='average', alpha=0.7)
+            _, p_interp, order = avg_curve.unpack_params()
             self.debug_axes[1, 0].plot(p_interp[order, 0], p_interp[order, 1], c='red', label='data projected', alpha=0.7)
 
-        return PrincipalCurve.from_params(s_interp, p_interp, order=order)
+        return avg_curve
         #
         #     avg.curve$w <- rowSums(vapply(pcurves, function(p){ p$w }, rep(0,nrow(X))))
         #     return(avg.curve)
