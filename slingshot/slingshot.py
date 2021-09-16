@@ -104,7 +104,9 @@ class Slingshot():
             # Calculate piecewise linear path
             p = np.stack(self.cluster_centres[lineage.clusters])
             s = np.zeros(p.shape[0])  # TODO
-            piecewise_linear.append(PrincipalCurve.from_params(s, p))
+            curve, _, _ = PrincipalCurve().project_to_curve(self.data, points=p)
+            # piecewise_linear.append(PrincipalCurve.from_params(s, p))
+            piecewise_linear.append(curve)
         return piecewise_linear
 
     def get_lineages(self):
