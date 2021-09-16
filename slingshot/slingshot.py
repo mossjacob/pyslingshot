@@ -5,16 +5,16 @@ from pcurve import PrincipalCurve
 from matplotlib.patches import Patch
 from scipy.sparse.csgraph import minimum_spanning_tree
 from sklearn.neighbors import KernelDensity
-from scipy.interpolate import interp1d
 from collections import deque
 from tqdm import tqdm
 
 from .util import scale_to_range, mahalanobis
 from .lineage import Lineage
+from .interp1d import interp1d
 
 
 class Slingshot():
-    def __init__(self, data, cluster_labels, start_node=0, debug_axes=None, debug_level=None):
+    def __init__(self, data, cluster_labels, start_node=0, debug_level=None):
         self.data = data
         self.cluster_labels_onehot = cluster_labels
         self.cluster_labels = self.cluster_labels_onehot.argmax(axis=1)
@@ -27,7 +27,6 @@ class Slingshot():
         self.branch_clusters = None
         debug_level = 0 if debug_level is None else dict(verbose=1)[debug_level]
         self.debug_level = debug_level
-        self._set_debug_axes(debug_axes)
 
         # Construct smoothing kernel for the shrinking step
         self.kernel_x = np.linspace(-3, 3, 512)
@@ -49,7 +48,6 @@ class Slingshot():
         for i,j,v in zip(cx.row, cx.col, cx.data):
             connections[i].append(j)
             connections[j].append(i)
-
 
         # for i,j,v in zip(cx.row, cx.col, cx.data):
         visited = [False for _ in range(self.num_clusters)]
@@ -219,7 +217,7 @@ class Slingshot():
                     path_to = (cells_involved[i][1], p.points_interp[i][1])
                     self.debug_axes[0, 1].plot(path_from, path_to, c='black', alpha=p.pseudotimes_interp[i])
                 self.debug_axes[0, 1].plot(p.points_interp[order, 0], p.points_interp[order, 1], label=str(lineage))
-            curve, d_sq, dist = p._project_to_curve(self.data, p.points_interp[order])
+            curve, d_sq, dist = p.project_to_curve(self.data, p.points_interp[order])
             distances.append(d_sq)
             curves.append(curve)
         return curves, cluster_lineages, distances
@@ -398,7 +396,7 @@ class Slingshot():
             #     shrunk_curve[:, 0],
             #     shrunk_curve[:, 1],
             #     label='shrunk', alpha=0.2, c='black')
-            curve._project_to_curve(self.data, points=shrunk_curve)
+            curve.project_to_curve(self.data, points=shrunk_curve)
             #     for(jj in seq_along(ns)){
             #         n <- ns[jj]
             #         if(grepl('Lineage',n)){
@@ -468,9 +466,8 @@ class Slingshot():
         # 2. Average over these curves and project the data onto the result
         avg = curves_dense.mean(axis=1)  # avg is already "sorted"
         avg_curve = PrincipalCurve()
-        avg_curve._project_to_curve(self.data, points=avg)
+        avg_curve.project_to_curve(self.data, points=avg)
         avg_curve.pseudotimes_interp -= avg_curve.pseudotimes_interp.min()
-
         if self.debug_plot_avg:
             self.debug_axes[1, 0].plot(avg[:, 0], avg[:, 1], c='blue', linestyle='--', label='average', alpha=0.7)
             _, p_interp, order = avg_curve.unpack_params()
