@@ -379,18 +379,19 @@ class Slingshot():
             pct = shrinkage_percent[curve]
 
             s_interp, p_interp, order = curve.unpack_params()
-            avg_s_interp, avg_p_interp, _ = avg_curve.unpack_params()
+            avg_s_interp, avg_p_interp, avg_order = avg_curve.unpack_params()
             shrunk_curve = np.zeros_like(p_interp)
             for j in range(num_dims_reduced):
                 orig = p_interp[order, j]
                 lin_interpolator = interp1d(
-                    avg_s_interp,       # x
-                    avg_p_interp[:, j], # y
+                    avg_s_interp[avg_order],     # x
+                    avg_p_interp[avg_order, j],  # y
+                    assume_sorted=True,
                     bounds_error=False,
-                    fill_value='extrapolate')
+                    fill_value='extrapolate',
+                    extrapolate_extrema=True)
                 avg = lin_interpolator(s_interp[order])
                 shrunk_curve[:, j] = (avg * pct + orig * (1 - pct))
-
             # w <- pcurve$w
             # pcurve = project_to_curve(X, as.matrix(s[pcurve$ord, ,drop = FALSE]), stretch = stretch)
             # pcurve$w <- w
@@ -434,7 +435,10 @@ class Slingshot():
         else:
             # pct_l = approx(x, y, pts2wt, rule = 2,
             #                 ties = 'ordered').y
-            lin_interpolator = interp1d(x, y, bounds_error=False, fill_value='extrapolate')
+            lin_interpolator = interp1d(x, y,
+                                        bounds_error=False,
+                                        fill_value='extrapolate',
+                                        extrapolate_extrema=False)
             pct_l = lin_interpolator(s_interp[order])
 
         return pct_l
@@ -469,7 +473,7 @@ class Slingshot():
         avg = curves_dense.mean(axis=1)  # avg is already "sorted"
         avg_curve = PrincipalCurve()
         avg_curve.project_to_curve(self.data, points=avg)
-        avg_curve.pseudotimes_interp -= avg_curve.pseudotimes_interp.min()
+        # avg_curve.pseudotimes_interp -= avg_curve.pseudotimes_interp.min()
         if self.debug_plot_avg:
             self.debug_axes[1, 0].plot(avg[:, 0], avg[:, 1], c='blue', linestyle='--', label='average', alpha=0.7)
             _, p_interp, order = avg_curve.unpack_params()
