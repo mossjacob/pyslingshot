@@ -4,13 +4,13 @@ import seaborn as sns
 from pcurve import PrincipalCurve
 from matplotlib.patches import Patch
 from scipy.sparse.csgraph import minimum_spanning_tree
+from scipy.interpolate import interp1d
 from sklearn.neighbors import KernelDensity
 from collections import deque
 from tqdm import tqdm
 
 from .util import scale_to_range, mahalanobis
 from .lineage import Lineage
-from .interp1d import interp1d
 
 
 class Slingshot():
@@ -383,14 +383,15 @@ class Slingshot():
             shrunk_curve = np.zeros_like(p_interp)
             for j in range(num_dims_reduced):
                 orig = p_interp[order, j]
-                lin_interpolator = interp1d(
+                avg = np.interp(#interp1d(
+                    s_interp[order],
                     avg_s_interp[avg_order],     # x
-                    avg_p_interp[avg_order, j],  # y
-                    assume_sorted=True,
-                    bounds_error=False,
-                    fill_value='extrapolate',
-                    extrapolate_extrema=True)
-                avg = lin_interpolator(s_interp[order])
+                    avg_p_interp[avg_order, j])#,  # y
+                    # assume_sorted=True,
+                    # bounds_error=False,
+                    # fill_value='extrapolate',
+                    # extrapolate_extrema=True)
+                # avg = lin_interpolator#(s_interp[order])
                 shrunk_curve[:, j] = (avg * pct + orig * (1 - pct))
             # w <- pcurve$w
             # pcurve = project_to_curve(X, as.matrix(s[pcurve$ord, ,drop = FALSE]), stretch = stretch)
@@ -435,11 +436,13 @@ class Slingshot():
         else:
             # pct_l = approx(x, y, pts2wt, rule = 2,
             #                 ties = 'ordered').y
-            lin_interpolator = interp1d(x, y,
-                                        bounds_error=False,
-                                        fill_value='extrapolate',
-                                        extrapolate_extrema=False)
-            pct_l = lin_interpolator(s_interp[order])
+            pct_l = np.interp(
+                s_interp[order],
+                x, y
+            )
+                # bounds_error=False,
+                # fill_value='extrapolate')
+            # pct_l = lin_interpolator()
 
         return pct_l
 
