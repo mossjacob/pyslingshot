@@ -88,12 +88,12 @@ class Slingshot():
             curves = self.get_curves()
             if epoch == num_epochs - 1:
                 self.plot_clusters(self.debug_axes[1, 1], s=2, alpha=0.5)
-                for curve in curves:
+                for l_idx, curve in enumerate(curves):
                     s_interp, p_interp, order = curve.unpack_params()
                     self.debug_axes[1, 1].plot(
                         p_interp[order, 0],
                         p_interp[order, 1],
-                        label='projected',
+                        label=f'Lineage {l_idx}',
                         alpha=1)
                     self.debug_axes[1, 1].legend()
 
