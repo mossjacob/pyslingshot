@@ -1,8 +1,6 @@
 import numpy as np
-import seaborn as sns
 
 from pcurve import PrincipalCurve
-from matplotlib.patches import Patch
 from scipy.sparse.csgraph import minimum_spanning_tree
 from scipy.interpolate import interp1d
 from sklearn.neighbors import KernelDensity
@@ -11,6 +9,7 @@ from tqdm import tqdm
 
 from .util import scale_to_range, mahalanobis
 from .lineage import Lineage
+from .plotter import SlingshotPlotter
 
 
 class Slingshot():
@@ -27,6 +26,7 @@ class Slingshot():
         self.branch_clusters = None
         debug_level = 0 if debug_level is None else dict(verbose=1)[debug_level]
         self.debug_level = debug_level
+        self.plotter = SlingshotPlotter(self)
 
         # Construct smoothing kernel for the shrinking step
         self.kernel_x = np.linspace(-3, 3, 512)
@@ -63,21 +63,6 @@ class Slingshot():
                     queue.append(child)
         return children
 
-    def plot_clusters(self, ax, s=8, alpha=1.):
-        # Plot clusters and start cluster
-        colors = np.array(sns.color_palette())
-        ax.scatter(self.data[:, 0], self.data[:, 1],
-                   c=colors[self.cluster_labels],
-                   s=s,
-                   alpha=alpha)
-        ax.scatter(
-            self.cluster_centres[self.start_node][0],
-            self.cluster_centres[self.start_node][1], c='red')
-        handles = [
-            Patch(color=colors[k], label=k) for k in range(self.num_clusters)
-        ]
-        ax.legend(handles=handles)
-
     def fit(self, num_epochs=10, debug_axes=None):
         self._set_debug_axes(debug_axes)
         if self.prev_curves is None:  # Initial curves and pseudotimes:
@@ -86,16 +71,10 @@ class Slingshot():
 
         for epoch in tqdm(range(num_epochs)):
             curves = self.get_curves()
-            if epoch == num_epochs - 1:
-                self.plot_clusters(self.debug_axes[1, 1], s=2, alpha=0.5)
-                for l_idx, curve in enumerate(curves):
-                    s_interp, p_interp, order = curve.unpack_params()
-                    self.debug_axes[1, 1].plot(
-                        p_interp[order, 0],
-                        p_interp[order, 1],
-                        label=f'Lineage {l_idx}',
-                        alpha=1)
-                    self.debug_axes[1, 1].legend()
+
+            if epoch == num_epochs - 1:  # plot curves
+                self.plotter.clusters(self.debug_axes[1, 1], s=2, alpha=0.5)
+                self.plotter.curves(self.debug_axes[1, 1], curves)
 
     def construct_initial_curves(self):
         """Constructs lineage principal curves using piecewise linear initialisation"""
@@ -129,7 +108,7 @@ class Slingshot():
         # Plot distance matrix, clusters, and MST
         # from matplotlib import pyplot as plt
         # plt.imshow(dists)
-        self.plot_clusters(self.debug_axes[0, 0])
+        self.plotter.clusters(self.debug_axes[0, 0])
         for root, children in tree.items():
             for child in children:
                 start = [self.cluster_centres[root][0], self.cluster_centres[child][0]]
@@ -140,7 +119,7 @@ class Slingshot():
         branch_clusters = deque()
         def recurse_branches(path, v):
             num_children = len(tree[v])
-            if num_children == 0:  # at leaf
+            if num_children == 0:  # at leaf, add a None token
                 return path + [v, None]
             elif num_children == 1:
                 return recurse_branches(path + [v], tree[v][0])
@@ -149,9 +128,9 @@ class Slingshot():
                 return [recurse_branches(path + [v], tree[v][i]) for i in range(num_children)]
 
         def flatten(li):
-            if li[-1] is None:
+            if li[-1] is None:  # special None token indicates a leaf
                 yield Lineage(li[:-1])
-            else:
+            else:  # otherwise yield from children
                 for l in li:
                     yield from flatten(l)
 
@@ -214,10 +193,12 @@ class Slingshot():
 
             if self.debug_plot_lineages:
                 self.debug_axes[0, 1].scatter(cells_involved[:, 0], cells_involved[:, 1], s=2, alpha=0.5)
+                alphas = p.pseudotimes_interp
+                alphas = (alphas - alphas.min()) / (alphas.max() - alphas.min())
                 for i in np.random.permutation(cells_involved.shape[0])[:50]:
                     path_from = (cells_involved[i][0], p.points_interp[i][0])
                     path_to = (cells_involved[i][1], p.points_interp[i][1])
-                    self.debug_axes[0, 1].plot(path_from, path_to, c='black', alpha=p.pseudotimes_interp[i])
+                    self.debug_axes[0, 1].plot(path_from, path_to, c='black', alpha=alphas[i])
                 self.debug_axes[0, 1].plot(p.points_interp[order, 0], p.points_interp[order, 1], label=str(lineage))
             curve, d_sq, dist = p.project_to_curve(self.data, p.points_interp[order])
             distances.append(d_sq)
@@ -280,7 +261,7 @@ class Slingshot():
         if self.debug_level > 0:
             print('Reversing from leaf to root')
         if self.debug_plot_avg:
-            self.plot_clusters(self.debug_axes[1, 0], s=4, alpha=0.4)
+            self.plotter.clusters(self.debug_axes[1, 0], s=4, alpha=0.4)
 
         while len(branch_clusters) > 0:
             # Starting at leaves, find lineages involved in branch
