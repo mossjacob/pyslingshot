@@ -83,7 +83,15 @@ class Slingshot():
             # Calculate piecewise linear path
             p = np.stack(self.cluster_centres[lineage.clusters])
             s = np.zeros(p.shape[0])  # TODO
-            curve, _, _ = PrincipalCurve().project_to_curve(self.data, points=p)
+
+            cell_mask = np.logical_or.reduce(
+                np.array([self.cluster_labels == k for k in lineage]))
+            cells_involved = self.data[cell_mask]
+
+            curve = PrincipalCurve(k=3)
+            curve.project_to_curve(cells_involved, points=p)
+            curve.project_to_curve(self.data, points=curve.points_interp[curve.order])
+
             # piecewise_linear.append(PrincipalCurve.from_params(s, p))
             piecewise_linear.append(curve)
         return piecewise_linear
@@ -186,21 +194,28 @@ class Slingshot():
             for k in lineage:
                 cluster_lineages[k].append(l_idx)
 
-            p = PrincipalCurve(k=3)  # cubic
-            prev_curve = self.prev_curves[l_idx]
-            p.fit(cells_involved, p=prev_curve.points_interp[prev_curve.order], max_iter=1)
-            order = p.order
+            curve = self.prev_curves[l_idx]
+            # curve = PrincipalCurve(k=3)  # cubic
+            from matplotlib import pyplot as plt
+            plt.figure()
+            # plt.scatter(p[:, 0], p[:, 1], c='red', s=40)
+            plt.scatter(curve.points_interp[curve.order][:, 0], curve.points_interp[curve.order][:, 1], c='blue', s=5)
+
+            curve.fit(self.data, max_iter=1)
+            plt.scatter(curve.points_interp[curve.order][:, 0], curve.points_interp[curve.order][:, 1], c='red', s=20, alpha=0.5)
+
+            order = curve.order
 
             if self.debug_plot_lineages:
                 self.debug_axes[0, 1].scatter(cells_involved[:, 0], cells_involved[:, 1], s=2, alpha=0.5)
-                alphas = p.pseudotimes_interp
+                alphas = curve.pseudotimes_interp
                 alphas = (alphas - alphas.min()) / (alphas.max() - alphas.min())
                 for i in np.random.permutation(cells_involved.shape[0])[:50]:
-                    path_from = (cells_involved[i][0], p.points_interp[i][0])
-                    path_to = (cells_involved[i][1], p.points_interp[i][1])
+                    path_from = (cells_involved[i][0], curve.points_interp[i][0])
+                    path_to = (cells_involved[i][1], curve.points_interp[i][1])
                     self.debug_axes[0, 1].plot(path_from, path_to, c='black', alpha=alphas[i])
-                self.debug_axes[0, 1].plot(p.points_interp[order, 0], p.points_interp[order, 1], label=str(lineage))
-            curve, d_sq, dist = p.project_to_curve(self.data, p.points_interp[order])
+                self.debug_axes[0, 1].plot(curve.points_interp[order, 0], curve.points_interp[order, 1], label=str(lineage))
+            d_sq, dist = curve.project_to_curve(self.data, curve.points_interp[order])
             distances.append(d_sq)
             curves.append(curve)
         return curves, cluster_lineages, distances
