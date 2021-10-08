@@ -1,3 +1,7 @@
 .idea
 
 *.pyc
+
+dist/
+
+src/pyslingshot.egg-info/
