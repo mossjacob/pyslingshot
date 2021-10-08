@@ -45,9 +45,13 @@ class Slingshot():
         self.debug_plot_avg = axes is not None
 
     def construct_mst(self, dists, start_node):
-        tree = minimum_spanning_tree(dists)
+        """
 
-        # Plot MST
+        :param dists: distances between clusters
+        :param start_node: the starting node of the minimum spanning tree
+        :return: children: a dictionary mapping clusters to the children of each cluster
+        """
+        tree = minimum_spanning_tree(dists)
         connections = {k: list() for k in range(self.num_clusters)}
         cx = tree.tocoo()
         for i,j,v in zip(cx.row, cx.col, cx.data):
@@ -149,9 +153,7 @@ class Slingshot():
 
         tree = self.construct_mst(dists, self.start_node)
 
-        # Plot distance matrix, clusters, and MST
-        # from matplotlib import pyplot as plt
-        # plt.imshow(dists)
+        # Plot clusters and MST
         self.plotter.clusters(self.debug_axes[0, 0])
         for root, children in tree.items():
             for child in children:
@@ -272,7 +274,7 @@ class Slingshot():
         """
         Starting at leaves, calculate average curves for each branch
 
-        :return:
+        :return: shrinkage_percentages, cluster_children, cluster_avg_curves
         """
         cell_weights = self.cell_weights
         shrinkage_percentages = list()
@@ -301,7 +303,7 @@ class Slingshot():
             branch_curves = list(cluster_children[k])
             if self.debug_level > 0:
                 print(f'Averaging branch @{k} with lineages:', branch_lineages, branch_curves)
-            #branch_lineages, curves
+
             avg_curve = self.avg_branch_curves(branch_curves)
             cluster_avg_curves[k] = avg_curve
             # avg.curve$w <- rowSums(vapply(pcurves, function(p){ p$w }, rep(0,nrow(X))))
@@ -369,12 +371,12 @@ class Slingshot():
 
     def shrink_branch_curves(self, branch_curves, avg_curve, shrinkage_percent):
         """
-        :param curve: tuple (pseudotimes, points)
-        :param avg_curve: tuple (pseudotimes, points) for average curve
-        :param pct: percentage shrinkage, in same order as curve.pseudotimes
-        :return:
+        Shrinks curves through a branch to the average curve.
+
+        :param branch_curves: list of `PrincipalCurve`s associated with the branch.
+        :param avg_curve: `PrincipalCurve` for average curve.
+        :param shrinkage_percent: percentage shrinkage, in same order as curve.pseudotimes
         """
-        num_cells = branch_curves[0].points_interp.shape[0]
         num_dims_reduced = branch_curves[0].points_interp.shape[1]
 
         # Go through "child" lineages, shrinking the curves toward the above average
@@ -418,9 +420,7 @@ class Slingshot():
             # }
             # avg.order <- new.avg.order
 
-        return
-
-    def shrinkage_percent(self, curve, common_ind, method = 'cosine'):
+    def shrinkage_percent(self, curve, common_ind):
         """Determines how much to shrink a curve"""
         # pst <- crv$lambda
         # pts2wt <- pst
@@ -437,15 +437,10 @@ class Slingshot():
         if q1 == q3:
             pct_l = np.zeros(s_interp.shape[0])
         else:
-            # pct_l = approx(x, y, pts2wt, rule = 2,
-            #                 ties = 'ordered').y
             pct_l = np.interp(
                 s_interp[order],
                 x, y
             )
-                # bounds_error=False,
-                # fill_value='extrapolate')
-            # pct_l = lin_interpolator()
 
         return pct_l
 
@@ -485,8 +480,15 @@ class Slingshot():
             _, p_interp, order = avg_curve.unpack_params()
             self.debug_axes[1, 0].plot(p_interp[order, 0], p_interp[order, 1], c='red', label='data projected', alpha=0.7)
 
+        # avg.curve$w <- rowSums(vapply(pcurves, function(p){ p$w }, rep(0,nrow(X))))
         return avg_curve
-        #
-        #     avg.curve$w <- rowSums(vapply(pcurves, function(p){ p$w }, rep(0,nrow(X))))
-        #     return(avg.curve)
-        # }
+
+    @property
+    def unified_pseudotime(self):
+        pseudotime = np.zeros_like(self.curves[0].pseudotimes_interp)
+        for l_idx, lineage in enumerate(self.lineages):
+            curve = self.curves[l_idx]
+            cell_mask = np.logical_or.reduce(
+                np.array([self.cluster_labels == k for k in lineage]))
+            pseudotime[cell_mask] = curve.pseudotimes_interp[cell_mask]
+        return pseudotime
