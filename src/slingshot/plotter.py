@@ -29,7 +29,13 @@ class SlingshotPlotter:
             ax.legend(handles=handles)
 
         elif color_mode == 'pseudotime':
-            colors = self.sling.curves[0].pseudotimes_interp
+            colors = np.zeros_like(self.sling.curves[0].pseudotimes_interp)
+            for l_idx, lineage in enumerate(sling.lineages):
+                curve = self.sling.curves[l_idx]
+                cell_mask = np.logical_or.reduce(
+                    np.array([sling.cluster_labels == k for k in lineage]))
+                colors[cell_mask] = curve.pseudotimes_interp[cell_mask]
+
         else:
             colors = 'black'
 
