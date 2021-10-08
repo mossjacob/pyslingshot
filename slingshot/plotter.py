@@ -1,33 +1,47 @@
 import numpy as np
 import seaborn as sns
 
+from matplotlib import pyplot as plt
 from matplotlib.patches import Patch
-
-# from .slingshot import Slingshot
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 class SlingshotPlotter:
     def __init__(self, sling):
         self.sling = sling
 
-    def clusters(self, ax, labels=None, s=8, alpha=1.):
+    def clusters(self, ax, labels=None, s=8, alpha=1., color_mode='clusters'):
+        fig = plt.gcf()
         sling = self.sling
         if labels is None:
             labels = np.arange(sling.num_clusters)
 
         # Plot clusters and start cluster
-        colors = np.array(sns.color_palette())
-        ax.scatter(sling.data[:, 0], sling.data[:, 1],
-                   c=colors[sling.cluster_labels],
-                   s=s,
-                   alpha=alpha)
         ax.scatter(
             sling.cluster_centres[sling.start_node][0],
             sling.cluster_centres[sling.start_node][1], c='red')
-        handles = [
-            Patch(color=colors[k], label=labels[k]) for k in range(sling.num_clusters)
-        ]
-        ax.legend(handles=handles)
+
+        if color_mode == 'clusters':
+            colors = np.array(sns.color_palette())[sling.cluster_labels]
+            handles = [
+                Patch(color=colors[k], label=labels[k]) for k in range(sling.num_clusters)
+            ]
+            ax.legend(handles=handles)
+
+        elif color_mode == 'pseudotime':
+            colors = self.sling.curves[0].pseudotimes_interp
+        else:
+            colors = 'black'
+
+        main_scatter = ax.scatter(sling.data[:, 0], sling.data[:, 1],
+                   c=colors,
+                   s=s,
+                   alpha=alpha)
+
+        if color_mode == 'pseudotime':
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes('right', size='5%', pad=0.05)
+            fig.colorbar(main_scatter, cax=cax, orientation='vertical')
 
     def curves(self, ax, curves):
         for l_idx, curve in enumerate(curves):
