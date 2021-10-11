@@ -31,6 +31,7 @@ class Slingshot():
         # Plotting and printing
         debug_level = 0 if debug_level is None else dict(verbose=1)[debug_level]
         self.debug_level = debug_level
+        self.debug_axes = None
         self.plotter = SlingshotPlotter(self)
 
         # Construct smoothing kernel for the shrinking step
@@ -38,6 +39,23 @@ class Slingshot():
         kde = KernelDensity(bandwidth=1., kernel='gaussian')
         kde.fit(np.zeros((self.kernel_x.shape[0], 1)))
         self.kernel_y = np.exp(kde.score_samples(self.kernel_x.reshape(-1, 1)))
+
+    def load_params(self, filepath):
+        if self.curves is None:
+            self.get_lineages()
+        params = np.load(filepath, allow_pickle=True).item()
+        self.curves = params['curves']   # list of principle curves len = #lineages
+        self.cell_weights = params['cell_weights']  # weights indicating cluster assignments
+        self.distances = params['distances']
+
+    def save_params(self, filepath):
+        params = dict(
+            curves=self.curves,
+            cell_weights=self.cell_weights,
+            distances=self.distances
+        )
+        print(self.curves)
+        np.save(filepath, params)
 
     def _set_debug_axes(self, axes):
         self.debug_axes = axes
@@ -88,7 +106,6 @@ class Slingshot():
 
             # Fit principal curve for all lineages using existing curves
             self.fit_lineage_curves()
-            self.debug_axes[0, 1].legend()
 
             # Ensure starts at 0
             for l_idx, lineage in enumerate(self.lineages):
@@ -99,7 +116,6 @@ class Slingshot():
             # Determine average curves
             shrinkage_percentages, cluster_children, cluster_avg_curves = \
                 self.avg_curves()
-            self.debug_axes[1, 0].legend()
 
             # Shrink towards average curves in areas of cells common to all branch lineages
             self.shrink_curves(cluster_children, shrinkage_percentages, cluster_avg_curves)
@@ -154,12 +170,13 @@ class Slingshot():
         tree = self.construct_mst(dists, self.start_node)
 
         # Plot clusters and MST
-        self.plotter.clusters(self.debug_axes[0, 0])
-        for root, children in tree.items():
-            for child in children:
-                start = [self.cluster_centres[root][0], self.cluster_centres[child][0]]
-                end = [self.cluster_centres[root][1], self.cluster_centres[child][1]]
-                self.debug_axes[0, 0].plot(start, end, c='black')
+        if self.debug_axes is not None:
+            self.plotter.clusters(self.debug_axes[0, 0])
+            for root, children in tree.items():
+                for child in children:
+                    start = [self.cluster_centres[root][0], self.cluster_centres[child][0]]
+                    end = [self.cluster_centres[root][1], self.cluster_centres[child][1]]
+                    self.debug_axes[0, 0].plot(start, end, c='black')
 
         # Determine lineages by parsing the MST
         branch_clusters = deque()
@@ -229,6 +246,8 @@ class Slingshot():
             d_sq, dist = curve.project_to_curve(self.data, curve.points_interp[curve.order])
             distances.append(d_sq)
         self.distances = distances
+        if self.debug_plot_lineages:
+            self.debug_axes[0, 1].legend()
 
     def calculate_cell_weights(self):
         """TODO: annotate, this is a translation from R"""
@@ -344,6 +363,8 @@ class Slingshot():
             #             return(pij)
             #         })
             # }
+        if self.debug_plot_avg:
+            self.debug_axes[1, 0].legend()
         return shrinkage_percentages, cluster_children, cluster_avg_curves
 
     def shrink_curves(self, cluster_children, shrinkage_percentages, cluster_avg_curves):
