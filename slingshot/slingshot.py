@@ -31,7 +31,7 @@ class Slingshot():
         # Plotting and printing
         debug_level = 0 if debug_level is None else dict(verbose=1)[debug_level]
         self.debug_level = debug_level
-        self.debug_axes = None
+        self._set_debug_axes(None)
         self.plotter = SlingshotPlotter(self)
 
         # Construct smoothing kernel for the shrinking step
@@ -59,16 +59,31 @@ class Slingshot():
 
     def _set_debug_axes(self, axes):
         self.debug_axes = axes
+        self.debug_plot_mst = axes is not None
         self.debug_plot_lineages = axes is not None
         self.debug_plot_avg = axes is not None
 
-    def construct_mst(self, dists, start_node):
+    def construct_mst(self, start_node):
         """
+        Parameters
+           start_node: the starting node of the minimum spanning tree
+        Returns:
+             children: a dictionary mapping clusters to the children of each cluster
+        """
+        # Calculate empirical covariance of clusters
+        emp_covs = np.stack([np.cov(self.data[self.cluster_labels == i].T) for i in range(self.num_clusters)])
+        dists = np.zeros((self.num_clusters, self.num_clusters))
+        for i in range(self.num_clusters):
+            for j in range(i, self.num_clusters):
+                dist = mahalanobis(
+                    self.cluster_centres[i],
+                    self.cluster_centres[j],
+                    emp_covs[i],
+                    emp_covs[j]
+                )
+                dists[i, j] = dist
+                dists[j, i] = dist
 
-        :param dists: distances between clusters
-        :param start_node: the starting node of the minimum spanning tree
-        :return: children: a dictionary mapping clusters to the children of each cluster
-        """
         tree = minimum_spanning_tree(dists)
         connections = {k: list() for k in range(self.num_clusters)}
         cx = tree.tocoo()
@@ -88,6 +103,16 @@ class Slingshot():
                 if not visited[child]:
                     children[current_node].append(child)
                     queue.append(child)
+
+        # Plot clusters and MST
+        if self.debug_plot_mst:
+            self.plotter.clusters(self.debug_axes[0, 0])
+            for root, children in children.items():
+                for child in children:
+                    start = [self.cluster_centres[root][0], self.cluster_centres[child][0]]
+                    end = [self.cluster_centres[root][1], self.cluster_centres[child][1]]
+                    self.debug_axes[0, 0].plot(start, end, c='black')
+            self.debug_plot_mst = False
         return children
 
     def fit(self, num_epochs=10, debug_axes=None):
@@ -153,30 +178,7 @@ class Slingshot():
         self.distances = distances
 
     def get_lineages(self):
-        # Calculate empirical covariance of clusters
-        emp_covs = np.stack([np.cov(self.data[self.cluster_labels == i].T) for i in range(self.num_clusters)])
-        dists = np.zeros((self.num_clusters, self.num_clusters))
-        for i in range(self.num_clusters):
-            for j in range(i, self.num_clusters):
-                dist = mahalanobis(
-                    self.cluster_centres[i],
-                    self.cluster_centres[j],
-                    emp_covs[i],
-                    emp_covs[j]
-                )
-                dists[i, j] = dist
-                dists[j, i] = dist
-
-        tree = self.construct_mst(dists, self.start_node)
-
-        # Plot clusters and MST
-        if self.debug_axes is not None:
-            self.plotter.clusters(self.debug_axes[0, 0])
-            for root, children in tree.items():
-                for child in children:
-                    start = [self.cluster_centres[root][0], self.cluster_centres[child][0]]
-                    end = [self.cluster_centres[root][1], self.cluster_centres[child][1]]
-                    self.debug_axes[0, 0].plot(start, end, c='black')
+        tree = self.construct_mst(self.start_node)
 
         # Determine lineages by parsing the MST
         branch_clusters = deque()
