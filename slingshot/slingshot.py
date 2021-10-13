@@ -107,8 +107,8 @@ class Slingshot():
         # Plot clusters and MST
         if self.debug_plot_mst:
             self.plotter.clusters(self.debug_axes[0, 0])
-            for root, children in children.items():
-                for child in children:
+            for root, kids in children.items():
+                for child in kids:
                     start = [self.cluster_centres[root][0], self.cluster_centres[child][0]]
                     end = [self.cluster_centres[root][1], self.cluster_centres[child][1]]
                     self.debug_axes[0, 0].plot(start, end, c='black')
