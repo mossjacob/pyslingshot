@@ -22,7 +22,7 @@ class SlingshotPlotter:
             sling.cluster_centres[sling.start_node][1], c='red')
 
         if color_mode == 'clusters':
-            colors = np.array(sns.color_palette())
+            colors = np.array(sns.color_palette('cubehelix', n_colors=sling.num_clusters))
             handles = [
                 Patch(color=colors[k], label=labels[k]) for k in range(sling.num_clusters)
             ]
