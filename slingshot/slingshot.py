@@ -13,12 +13,13 @@ from .plotter import SlingshotPlotter
 
 
 class Slingshot():
-    def __init__(self, data, cluster_labels, start_node=0, debug_level=None):
+    def __init__(self, data, cluster_labels, start_node=0, end_nodes=None, debug_level=None):
         self.data = data
         self.cluster_labels_onehot = cluster_labels
         self.cluster_labels = self.cluster_labels_onehot.argmax(axis=1)
         self.num_clusters = self.cluster_labels.max() + 1
         self.start_node = start_node
+        self.end_nodes = [] if end_nodes is None else end_nodes
         cluster_centres = [data[self.cluster_labels == k].mean(axis=0) for k in range(self.num_clusters)]
         self.cluster_centres = np.stack(cluster_centres)
         self.lineages = None      # list of Lineages
@@ -54,7 +55,6 @@ class Slingshot():
             cell_weights=self.cell_weights,
             distances=self.distances
         )
-        print(self.curves)
         np.save(filepath, params)
 
     def _set_debug_axes(self, axes):
@@ -84,12 +84,26 @@ class Slingshot():
                 dists[i, j] = dist
                 dists[j, i] = dist
 
-        tree = minimum_spanning_tree(dists)
+        # Find minimum spanning tree excluding end nodes
+        mst_dists = np.delete(np.delete(dists, self.end_nodes, axis=0), self.end_nodes, axis=1)  # Delete end nodes
+        tree = minimum_spanning_tree(mst_dists)
+        # On the left: indices with ends removed; on the right: index into an array where the ends are skipped
+        index_mapping = np.array([c for c in range(self.num_clusters - len(self.end_nodes))])
+        for i, end_node in enumerate(self.end_nodes):
+            index_mapping[end_node - i:] += 1
+
         connections = {k: list() for k in range(self.num_clusters)}
         cx = tree.tocoo()
-        for i,j,v in zip(cx.row, cx.col, cx.data):
+        for i, j, v in zip(cx.row, cx.col, cx.data):
+            i = index_mapping[i]
+            j = index_mapping[j]
             connections[i].append(j)
             connections[j].append(i)
+
+        for end in self.end_nodes:
+            i = np.argmin(np.delete(dists[end], self.end_nodes))
+            connections[i].append(end)
+            connections[end].append(i)
 
         # for i,j,v in zip(cx.row, cx.col, cx.data):
         visited = [False for _ in range(self.num_clusters)]
@@ -106,7 +120,7 @@ class Slingshot():
 
         # Plot clusters and MST
         if self.debug_plot_mst:
-            self.plotter.clusters(self.debug_axes[0, 0])
+            self.plotter.clusters(self.debug_axes[0, 0], alpha=0.5)
             for root, kids in children.items():
                 for child in kids:
                     start = [self.cluster_centres[root][0], self.cluster_centres[child][0]]
