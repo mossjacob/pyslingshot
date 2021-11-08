@@ -529,3 +529,9 @@ class Slingshot():
                 np.array([self.cluster_labels == k for k in lineage]))
             pseudotime[cell_mask] = curve.pseudotimes_interp[cell_mask]
         return pseudotime
+
+    def list_lineages(self, cluster_to_label):
+        for lineage in self.lineages:
+            print(', '.join([
+                cluster_to_label[l] for l in lineage
+            ]))
