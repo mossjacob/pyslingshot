@@ -13,12 +13,13 @@ from .plotter import SlingshotPlotter
 
 
 class Slingshot():
-    def __init__(self, data, cluster_labels, start_node=0, debug_level=None):
+    def __init__(self, data, cluster_labels, start_node=0, end_nodes=None, debug_level=None):
         self.data = data
         self.cluster_labels_onehot = cluster_labels
         self.cluster_labels = self.cluster_labels_onehot.argmax(axis=1)
         self.num_clusters = self.cluster_labels.max() + 1
         self.start_node = start_node
+        self.end_nodes = [] if end_nodes is None else end_nodes
         cluster_centres = [data[self.cluster_labels == k].mean(axis=0) for k in range(self.num_clusters)]
         self.cluster_centres = np.stack(cluster_centres)
         self.lineages = None      # list of Lineages
@@ -31,6 +32,7 @@ class Slingshot():
         # Plotting and printing
         debug_level = 0 if debug_level is None else dict(verbose=1)[debug_level]
         self.debug_level = debug_level
+        self._set_debug_axes(None)
         self.plotter = SlingshotPlotter(self)
 
         # Construct smoothing kernel for the shrinking step
@@ -39,20 +41,69 @@ class Slingshot():
         kde.fit(np.zeros((self.kernel_x.shape[0], 1)))
         self.kernel_y = np.exp(kde.score_samples(self.kernel_x.reshape(-1, 1)))
 
+    def load_params(self, filepath):
+        if self.curves is None:
+            self.get_lineages()
+        params = np.load(filepath, allow_pickle=True).item()
+        self.curves = params['curves']   # list of principle curves len = #lineages
+        self.cell_weights = params['cell_weights']  # weights indicating cluster assignments
+        self.distances = params['distances']
+
+    def save_params(self, filepath):
+        params = dict(
+            curves=self.curves,
+            cell_weights=self.cell_weights,
+            distances=self.distances
+        )
+        np.save(filepath, params)
+
     def _set_debug_axes(self, axes):
         self.debug_axes = axes
+        self.debug_plot_mst = axes is not None
         self.debug_plot_lineages = axes is not None
         self.debug_plot_avg = axes is not None
 
-    def construct_mst(self, dists, start_node):
-        tree = minimum_spanning_tree(dists)
+    def construct_mst(self, start_node):
+        """
+        Parameters
+           start_node: the starting node of the minimum spanning tree
+        Returns:
+             children: a dictionary mapping clusters to the children of each cluster
+        """
+        # Calculate empirical covariance of clusters
+        emp_covs = np.stack([np.cov(self.data[self.cluster_labels == i].T) for i in range(self.num_clusters)])
+        dists = np.zeros((self.num_clusters, self.num_clusters))
+        for i in range(self.num_clusters):
+            for j in range(i, self.num_clusters):
+                dist = mahalanobis(
+                    self.cluster_centres[i],
+                    self.cluster_centres[j],
+                    emp_covs[i],
+                    emp_covs[j]
+                )
+                dists[i, j] = dist
+                dists[j, i] = dist
 
-        # Plot MST
+        # Find minimum spanning tree excluding end nodes
+        mst_dists = np.delete(np.delete(dists, self.end_nodes, axis=0), self.end_nodes, axis=1)  # Delete end nodes
+        tree = minimum_spanning_tree(mst_dists)
+        # On the left: indices with ends removed; on the right: index into an array where the ends are skipped
+        index_mapping = np.array([c for c in range(self.num_clusters - len(self.end_nodes))])
+        for i, end_node in enumerate(self.end_nodes):
+            index_mapping[end_node - i:] += 1
+
         connections = {k: list() for k in range(self.num_clusters)}
         cx = tree.tocoo()
-        for i,j,v in zip(cx.row, cx.col, cx.data):
+        for i, j, v in zip(cx.row, cx.col, cx.data):
+            i = index_mapping[i]
+            j = index_mapping[j]
             connections[i].append(j)
             connections[j].append(i)
+
+        for end in self.end_nodes:
+            i = np.argmin(np.delete(dists[end], self.end_nodes))
+            connections[i].append(end)
+            connections[end].append(i)
 
         # for i,j,v in zip(cx.row, cx.col, cx.data):
         visited = [False for _ in range(self.num_clusters)]
@@ -66,6 +117,16 @@ class Slingshot():
                 if not visited[child]:
                     children[current_node].append(child)
                     queue.append(child)
+
+        # Plot clusters and MST
+        if self.debug_plot_mst:
+            self.plotter.clusters(self.debug_axes[0, 0], alpha=0.5)
+            for root, kids in children.items():
+                for child in kids:
+                    start = [self.cluster_centres[root][0], self.cluster_centres[child][0]]
+                    end = [self.cluster_centres[root][1], self.cluster_centres[child][1]]
+                    self.debug_axes[0, 0].plot(start, end, c='black')
+            self.debug_plot_mst = False
         return children
 
     def fit(self, num_epochs=10, debug_axes=None):
@@ -84,7 +145,6 @@ class Slingshot():
 
             # Fit principal curve for all lineages using existing curves
             self.fit_lineage_curves()
-            self.debug_axes[0, 1].legend()
 
             # Ensure starts at 0
             for l_idx, lineage in enumerate(self.lineages):
@@ -95,7 +155,6 @@ class Slingshot():
             # Determine average curves
             shrinkage_percentages, cluster_children, cluster_avg_curves = \
                 self.avg_curves()
-            self.debug_axes[1, 0].legend()
 
             # Shrink towards average curves in areas of cells common to all branch lineages
             self.shrink_curves(cluster_children, shrinkage_percentages, cluster_avg_curves)
@@ -133,31 +192,7 @@ class Slingshot():
         self.distances = distances
 
     def get_lineages(self):
-        # Calculate empirical covariance of clusters
-        emp_covs = np.stack([np.cov(self.data[self.cluster_labels == i].T) for i in range(self.num_clusters)])
-        dists = np.zeros((self.num_clusters, self.num_clusters))
-        for i in range(self.num_clusters):
-            for j in range(i, self.num_clusters):
-                dist = mahalanobis(
-                    self.cluster_centres[i],
-                    self.cluster_centres[j],
-                    emp_covs[i],
-                    emp_covs[j]
-                )
-                dists[i, j] = dist
-                dists[j, i] = dist
-
-        tree = self.construct_mst(dists, self.start_node)
-
-        # Plot distance matrix, clusters, and MST
-        # from matplotlib import pyplot as plt
-        # plt.imshow(dists)
-        self.plotter.clusters(self.debug_axes[0, 0])
-        for root, children in tree.items():
-            for child in children:
-                start = [self.cluster_centres[root][0], self.cluster_centres[child][0]]
-                end = [self.cluster_centres[root][1], self.cluster_centres[child][1]]
-                self.debug_axes[0, 0].plot(start, end, c='black')
+        tree = self.construct_mst(self.start_node)
 
         # Determine lineages by parsing the MST
         branch_clusters = deque()
@@ -227,6 +262,8 @@ class Slingshot():
             d_sq, dist = curve.project_to_curve(self.data, curve.points_interp[curve.order])
             distances.append(d_sq)
         self.distances = distances
+        if self.debug_plot_lineages:
+            self.debug_axes[0, 1].legend()
 
     def calculate_cell_weights(self):
         """TODO: annotate, this is a translation from R"""
@@ -272,7 +309,7 @@ class Slingshot():
         """
         Starting at leaves, calculate average curves for each branch
 
-        :return:
+        :return: shrinkage_percentages, cluster_children, cluster_avg_curves
         """
         cell_weights = self.cell_weights
         shrinkage_percentages = list()
@@ -301,7 +338,7 @@ class Slingshot():
             branch_curves = list(cluster_children[k])
             if self.debug_level > 0:
                 print(f'Averaging branch @{k} with lineages:', branch_lineages, branch_curves)
-            #branch_lineages, curves
+
             avg_curve = self.avg_branch_curves(branch_curves)
             cluster_avg_curves[k] = avg_curve
             # avg.curve$w <- rowSums(vapply(pcurves, function(p){ p$w }, rep(0,nrow(X))))
@@ -342,6 +379,8 @@ class Slingshot():
             #             return(pij)
             #         })
             # }
+        if self.debug_plot_avg:
+            self.debug_axes[1, 0].legend()
         return shrinkage_percentages, cluster_children, cluster_avg_curves
 
     def shrink_curves(self, cluster_children, shrinkage_percentages, cluster_avg_curves):
@@ -369,12 +408,12 @@ class Slingshot():
 
     def shrink_branch_curves(self, branch_curves, avg_curve, shrinkage_percent):
         """
-        :param curve: tuple (pseudotimes, points)
-        :param avg_curve: tuple (pseudotimes, points) for average curve
-        :param pct: percentage shrinkage, in same order as curve.pseudotimes
-        :return:
+        Shrinks curves through a branch to the average curve.
+
+        :param branch_curves: list of `PrincipalCurve`s associated with the branch.
+        :param avg_curve: `PrincipalCurve` for average curve.
+        :param shrinkage_percent: percentage shrinkage, in same order as curve.pseudotimes
         """
-        num_cells = branch_curves[0].points_interp.shape[0]
         num_dims_reduced = branch_curves[0].points_interp.shape[1]
 
         # Go through "child" lineages, shrinking the curves toward the above average
@@ -418,9 +457,7 @@ class Slingshot():
             # }
             # avg.order <- new.avg.order
 
-        return
-
-    def shrinkage_percent(self, curve, common_ind, method = 'cosine'):
+    def shrinkage_percent(self, curve, common_ind):
         """Determines how much to shrink a curve"""
         # pst <- crv$lambda
         # pts2wt <- pst
@@ -437,15 +474,10 @@ class Slingshot():
         if q1 == q3:
             pct_l = np.zeros(s_interp.shape[0])
         else:
-            # pct_l = approx(x, y, pts2wt, rule = 2,
-            #                 ties = 'ordered').y
             pct_l = np.interp(
                 s_interp[order],
                 x, y
             )
-                # bounds_error=False,
-                # fill_value='extrapolate')
-            # pct_l = lin_interpolator()
 
         return pct_l
 
@@ -485,8 +517,21 @@ class Slingshot():
             _, p_interp, order = avg_curve.unpack_params()
             self.debug_axes[1, 0].plot(p_interp[order, 0], p_interp[order, 1], c='red', label='data projected', alpha=0.7)
 
+        # avg.curve$w <- rowSums(vapply(pcurves, function(p){ p$w }, rep(0,nrow(X))))
         return avg_curve
-        #
-        #     avg.curve$w <- rowSums(vapply(pcurves, function(p){ p$w }, rep(0,nrow(X))))
-        #     return(avg.curve)
-        # }
+
+    @property
+    def unified_pseudotime(self):
+        pseudotime = np.zeros_like(self.curves[0].pseudotimes_interp)
+        for l_idx, lineage in enumerate(self.lineages):
+            curve = self.curves[l_idx]
+            cell_mask = np.logical_or.reduce(
+                np.array([self.cluster_labels == k for k in lineage]))
+            pseudotime[cell_mask] = curve.pseudotimes_interp[cell_mask]
+        return pseudotime
+
+    def list_lineages(self, cluster_to_label):
+        for lineage in self.lineages:
+            print(', '.join([
+                cluster_to_label[l] for l in lineage
+            ]))

@@ -22,12 +22,12 @@ class SlingshotPlotter:
             sling.cluster_centres[sling.start_node][1], c='red')
 
         if color_mode == 'clusters':
-            colors = np.array(sns.color_palette())[sling.cluster_labels]
+            colors = np.array(sns.color_palette('cubehelix', n_colors=sling.num_clusters))
             handles = [
                 Patch(color=colors[k], label=labels[k]) for k in range(sling.num_clusters)
             ]
             ax.legend(handles=handles)
-
+            colors = colors[sling.cluster_labels]
         elif color_mode == 'pseudotime':
             colors = np.zeros_like(self.sling.curves[0].pseudotimes_interp)
             for l_idx, lineage in enumerate(sling.lineages):
