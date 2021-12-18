@@ -88,7 +88,8 @@ class SlingshotPlotter:
                 cell_mask = np.logical_or.reduce(
                     np.array([sling.cluster_labels == k for k in lineage]))
                 colors[cell_mask] = curve.pseudotimes_interp[cell_mask]
-
+        elif type(color_mode) is np.array:
+            colors = color_mode
         else:
             colors = 'black'
 
@@ -111,3 +112,33 @@ class SlingshotPlotter:
                 label=f'Lineage {l_idx}',
                 alpha=1)
             ax.legend()
+
+    def network(self, cluster_to_label, figsize=(8, 10)):
+        import networkx as nx
+        from networkx.drawing.nx_agraph import graphviz_layout
+        plt.figure(figsize=figsize)
+        G = nx.DiGraph(scale=0.02)
+        lineages = self.sling.lineages
+        root = cluster_to_label[lineages[0].clusters[0]]
+
+        for lineage in lineages:
+            parent = root
+            for l in lineage:
+                node = cluster_to_label[l]
+                G.add_node(node)
+                G.add_edge(parent, node)
+                parent = node
+
+        plt.title('Lineages')
+        pos = graphviz_layout(G, prog='dot')
+        label_options = dict(
+            ec="k", fc='b', alpha=0.9,
+            boxstyle='round,pad=0.2'
+        )
+
+        nx.draw(
+            G, pos,
+            arrows=True,
+            node_size=[len(v) * 100 for v in G.nodes()]
+        )
+        nx.draw_networkx_labels(G, pos, font_size=14, font_color='w', bbox=label_options)
