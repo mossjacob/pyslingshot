@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="pyslingshot",
-    version="0.0.1",
+    version="0.0.2",
     author="Jacob Moss",
     author_email="jm2311@cam.ac.uk",
     description="Python implementation of the Slingshot pseudotime algorithm",
