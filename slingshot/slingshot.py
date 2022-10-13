@@ -28,6 +28,7 @@ class Slingshot():
         self.cell_weights = None  # weights indicating cluster assignments
         self.distances = None
         self.branch_clusters = None
+        self._tree = None
 
         # Plotting and printing
         debug_level = 0 if debug_level is None else dict(verbose=1)[debug_level]
@@ -40,6 +41,12 @@ class Slingshot():
         kde = KernelDensity(bandwidth=1., kernel='gaussian')
         kde.fit(np.zeros((self.kernel_x.shape[0], 1)))
         self.kernel_y = np.exp(kde.score_samples(self.kernel_x.reshape(-1, 1)))
+
+    @property
+    def tree(self):
+        if self._tree is None:
+            self.construct_mst(self.start_node)
+        return self._tree
 
     def load_params(self, filepath):
         if self.curves is None:
@@ -127,6 +134,8 @@ class Slingshot():
                     end = [self.cluster_centres[root][1], self.cluster_centres[child][1]]
                     self.debug_axes[0, 0].plot(start, end, c='black')
             self.debug_plot_mst = False
+
+        self._tree = children
         return children
 
     def fit(self, num_epochs=10, debug_axes=None):
