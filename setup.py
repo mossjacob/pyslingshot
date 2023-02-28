@@ -22,4 +22,9 @@ setuptools.setup(
     ],
     packages=["slingshot"],
     python_requires=">=3.7",
+    install_setup_requires=[
+        'numpy', 'scipy', 'sklearn',
+        # Moss Jacob's fork of PCurvePy
+        'git+https://github.com/mossjacob/pcurvepy',
+    ]
 )
