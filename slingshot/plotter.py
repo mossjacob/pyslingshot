@@ -45,7 +45,11 @@ def generate_colormap(number_of_distinct_colors: int = 80):
     # First colours are affected more, colours closer to the middle are affected less
     lower_half = lower_partitions_half * number_of_shades
     for i in range(3):
-        initial_cm[0:lower_half, i] *= np.arange(0.2, 1, 0.8/lower_half)
+        step_size = 0.8
+        if lower_half != 0:
+            step_size /= lower_half
+
+        initial_cm[0:lower_half, i] *= np.arange(0.2, 1, step_size)        
 
     # Modify second half in such way that colours towards end of partition are less intense and brighter
     # Colours closer to the middle are affected less, colours closer to the end are affected more

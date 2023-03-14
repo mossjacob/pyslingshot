@@ -5,7 +5,7 @@ from scipy.sparse.csgraph import minimum_spanning_tree
 from scipy.interpolate import interp1d
 from sklearn.neighbors import KernelDensity
 from collections import deque
-from tqdm import tqdm
+from tqdm.autonotebook import tqdm
 
 from .util import scale_to_range, mahalanobis
 from .lineage import Lineage
