@@ -171,7 +171,7 @@ class Slingshot():
             self.debug_plot_lineages = False
             self.debug_plot_avg = False
 
-            if epoch == num_epochs - 1:  # plot curves
+            if self.debug_axes is not None and epoch == num_epochs - 1:  # plot curves
                 self.plotter.clusters(self.debug_axes[1, 1], s=2, alpha=0.5)
                 self.plotter.curves(self.debug_axes[1, 1], self.curves)
 
