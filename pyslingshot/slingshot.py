@@ -1,6 +1,9 @@
-import numpy as np
+from typing import Union
 
-from pcurve import PrincipalCurve
+import numpy as np
+from anndata import AnnData
+
+from pcurvepy2 import PrincipalCurve
 from scipy.sparse.csgraph import minimum_spanning_tree
 from scipy.interpolate import interp1d
 from sklearn.neighbors import KernelDensity
@@ -12,11 +15,41 @@ from .lineage import Lineage
 from .plotter import SlingshotPlotter
 
 
-class Slingshot():
-    def __init__(self, data, cluster_labels, start_node=0, end_nodes=None, debug_level=None):
+class Slingshot:
+    def __init__(
+            self,
+            data: Union[AnnData, np.ndarray],
+            cluster_labels_onehot=None,
+            celltype_key=None,
+            obsm_key='X_umap',
+            start_node=0,
+            end_nodes=None,
+            debug_level=None
+    ):
+        """
+        Constructs a new `Slingshot` object.
+        Args:
+            data: either an AnnData object or a numpy array containing the dimensionality-reduced data of shape (num_cells, 2)
+            cluster_labels: cluster assignments of shape (num_cells). Only required if `data` is not an AnnData object.
+            celltype_key: key into AnnData.obs indicating cell type. Only required if `data` is an AnnData object.
+            obsm_key: key into AnnData.obsm indicating the dimensionality-reduced data. Only required if `data` is an AnnData object.
+            start_node: the starting node of the minimum spanning tree
+            end_nodes: any terminal nodes
+            debug_level:
+        """
+        if isinstance(data, AnnData):
+            assert celltype_key is not None, "Must provide celltype key if data is an AnnData object"
+            cluster_labels = data.obs[celltype_key]
+            cluster_labels_onehot = np.zeros((cluster_labels.shape[0], cluster_labels.max() + 1))
+            cluster_labels_onehot[np.arange(cluster_labels.shape[0]), cluster_labels] = 1
+
+            data = data.obsm[obsm_key]
+        else:
+            assert cluster_labels_onehot is not None, "Must provide cluster labels if data is not an AnnData object"
+            cluster_labels = self.cluster_labels_onehot.argmax(axis=1)
         self.data = data
-        self.cluster_labels_onehot = cluster_labels
-        self.cluster_labels = self.cluster_labels_onehot.argmax(axis=1)
+        self.cluster_labels_onehot = cluster_labels_onehot
+        self.cluster_labels = cluster_labels
         self.num_clusters = self.cluster_labels.max() + 1
         self.start_node = start_node
         self.end_nodes = [] if end_nodes is None else end_nodes

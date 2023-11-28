@@ -5,15 +5,17 @@ The original implementation is written in R: https://github.com/kstreet13/slings
 
 A complete working example is located in `slingshot.ipynb`, using a synthetically generated dataset.
 
-Installation: 
+## Installation: 
 
-- Requires `numpy`, `scipy`, `sklearn`
-- My fork of `pcurvepy` (https://github.com/mossjacob/pcurvepy):
-  - `pip install git+https://github.com/mossjacob/pcurvepy`
 
 - Finally install pyslingshot:
   - `pip install pyslingshot`
 
 <img src=readme_example.png height="200">
+
+## Contributing
+
+- Fork & download source
+- Install requirements with `poetry install`
 
 [1] Street, K., Risso, D., Fletcher, R.B., Das, D., Ngai, J., Yosef, N., Purdom, E. and Dudoit, S., 2018. Slingshot: cell lineage and pseudotime inference for single-cell transcriptomics. BMC genomics, 19(1), pp.1-16.
