@@ -7,9 +7,13 @@ A complete working example is located in `slingshot.ipynb`, using a syntheticall
 
 ## Installation: 
 
+- `pip install pyslingshot`
 
-- Finally install pyslingshot:
-  - `pip install pyslingshot`
+
+### Deprecated version
+Older versions if pyslingshot (before v0.1.0) requires manually installing `numpy`, `scipy`, `sklearn`, and my fork 
+of `pcurvepy` (https://github.com/mossjacob/pcurvepy).
+
 
 <img src=readme_example.png height="200">
 
