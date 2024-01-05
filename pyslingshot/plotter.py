@@ -83,13 +83,13 @@ class SlingshotPlotter:
                 Patch(color=colors.colors[k], label=labels[k]) for k in range(sling.num_clusters)
             ]
             ax.legend(handles=handles)
-            colors = colors.colors[sling.cluster_labels]
+            colors = colors.colors[sling.cluster_label_indices]
         elif color_mode == 'pseudotime':
             colors = np.zeros_like(self.sling.curves[0].pseudotimes_interp)
             for l_idx, lineage in enumerate(sling.lineages):
                 curve = self.sling.curves[l_idx]
                 cell_mask = np.logical_or.reduce(
-                    np.array([sling.cluster_labels == k for k in lineage]))
+                    np.array([sling.cluster_label_indices == k for k in lineage]))
                 colors[cell_mask] = curve.pseudotimes_interp[cell_mask]
         elif type(color_mode) is np.array:
             colors = color_mode

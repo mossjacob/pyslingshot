@@ -10,7 +10,7 @@ from sklearn.neighbors import KernelDensity
 from collections import deque
 from tqdm.autonotebook import tqdm
 
-from .util import scale_to_range, mahalanobis
+from .util import scale_to_range, mahalanobis, isint, isstr
 from .lineage import Lineage
 from .plotter import SlingshotPlotter
 
@@ -40,8 +40,18 @@ class Slingshot:
         if isinstance(data, AnnData):
             assert celltype_key is not None, "Must provide celltype key if data is an AnnData object"
             cluster_labels = data.obs[celltype_key]
-            cluster_labels_onehot = np.zeros((cluster_labels.shape[0], cluster_labels.max() + 1))
-            cluster_labels_onehot[np.arange(cluster_labels.shape[0]), cluster_labels] = 1
+
+            if isint(cluster_labels[0]):
+                cluster_max = cluster_labels.max()
+                self.cluster_label_indices = cluster_labels
+            elif isstr(cluster_labels[0]):
+                cluster_max = len(np.unique(cluster_labels))
+                # Convert list of str labels into a list of int indices
+                self.cluster_label_indices = np.array([np.where(np.unique(cluster_labels) == label)[0][0] for label in cluster_labels])
+            else:
+                raise ValueError("Unexpected cluster label dtype.")
+            cluster_labels_onehot = np.zeros((cluster_labels.shape[0], cluster_max + 1))
+            cluster_labels_onehot[np.arange(cluster_labels.shape[0]), self.cluster_label_indices] = 1
 
             data = data.obsm[obsm_key]
         else:
@@ -50,10 +60,10 @@ class Slingshot:
         self.data = data
         self.cluster_labels_onehot = cluster_labels_onehot
         self.cluster_labels = cluster_labels
-        self.num_clusters = self.cluster_labels.max() + 1
+        self.num_clusters = self.cluster_label_indices.max() + 1
         self.start_node = start_node
         self.end_nodes = [] if end_nodes is None else end_nodes
-        cluster_centres = [data[self.cluster_labels == k].mean(axis=0) for k in range(self.num_clusters)]
+        cluster_centres = [data[self.cluster_label_indices == k].mean(axis=0) for k in range(self.num_clusters)]
         self.cluster_centres = np.stack(cluster_centres)
         self.lineages = None      # list of Lineages
         self.cluster_lineages = None # lineages belonging to each cluster
@@ -111,7 +121,7 @@ class Slingshot:
              children: a dictionary mapping clusters to the children of each cluster
         """
         # Calculate empirical covariance of clusters
-        emp_covs = np.stack([np.cov(self.data[self.cluster_labels == i].T) for i in range(self.num_clusters)])
+        emp_covs = np.stack([np.cov(self.data[self.cluster_label_indices == i].T) for i in range(self.num_clusters)])
         dists = np.zeros((self.num_clusters, self.num_clusters))
         for i in range(self.num_clusters):
             for j in range(i, self.num_clusters):
@@ -219,7 +229,7 @@ class Slingshot:
             s = np.zeros(p.shape[0])  # TODO
 
             cell_mask = np.logical_or.reduce(
-                np.array([self.cluster_labels == k for k in lineage]))
+                np.array([self.cluster_label_indices == k for k in lineage]))
             cells_involved = self.data[cell_mask]
 
             curve = PrincipalCurve(k=3)
@@ -289,7 +299,7 @@ class Slingshot:
 
             if self.debug_plot_lineages:
                 cell_mask = np.logical_or.reduce(
-                    np.array([self.cluster_labels == k for k in lineage]))
+                    np.array([self.cluster_label_indices == k for k in lineage]))
                 cells_involved = self.data[cell_mask]
                 self.debug_axes[0, 1].scatter(cells_involved[:, 0], cells_involved[:, 1], s=2, alpha=0.5)
                 alphas = curve.pseudotimes_interp
@@ -568,7 +578,7 @@ class Slingshot:
         for l_idx, lineage in enumerate(self.lineages):
             curve = self.curves[l_idx]
             cell_mask = np.logical_or.reduce(
-                np.array([self.cluster_labels == k for k in lineage]))
+                np.array([self.cluster_label_indices == k for k in lineage]))
             pseudotime[cell_mask] = curve.pseudotimes_interp[cell_mask]
         return pseudotime
 
