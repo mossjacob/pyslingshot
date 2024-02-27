@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pyslingshot"
-version = "0.1.3"
+version = "0.1.4"
 description = "Python implementation of the Slingshot pseudotime algorithm"
 authors = ["Jacob Moss <cob.mossy@gmail.com>"]
 license = "MIT"
@@ -11,7 +11,7 @@ repository = "https://github.com/mossjacob/pyslingshot"
 python = "^3.8"
 matplotlib = "^3.6.0"
 numpy = "^1.23.0"
-seaborn = "^0.12.0"
+seaborn = ">=0.12.0"
 pcurvepy2 = "0.1.5"
 tqdm = "*"
 notebook = "*"
