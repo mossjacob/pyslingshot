@@ -1,5 +1,5 @@
 from typing import Union
-
+import copy
 import numpy as np
 from anndata import AnnData
 
@@ -72,6 +72,8 @@ class Slingshot:
         self.distances = None
         self.branch_clusters = None
         self._tree = None
+        self.curve_fit_retry_count = 30 # require big enough number
+        self.curve_fit_retry_rate = 1.2 # 20% increase s value
 
         # Plotting and printing
         debug_level = 0 if debug_level is None else dict(verbose=1)[debug_level]
@@ -286,16 +288,29 @@ class Slingshot:
 
         # Calculate principal curves
         for l_idx, lineage in enumerate(self.lineages):
-            curve = self.curves[l_idx]
-
             # Fit principal curve through data
             # Weights are important as they effectively silence points
             # that are not associated with the lineage.
-            curve.fit(
-                self.data,
-                max_iter=1,
-                w=self.cell_weights[:, l_idx]
-            )
+            this_s = len(self.cell_weights[:, l_idx])
+            for _ in range(self.curve_fit_retry_count):
+                curve = copy.deepcopy(self.curves[l_idx])
+                curve.fit(
+                    self.data,
+                    max_iter=1,
+                    w=self.cell_weights[:, l_idx],
+                    s=this_s,
+                )
+
+                if sum(np.isnan(curve.pseudotimes_interp)) == 0:
+                    break
+                this_s = int(this_s * self.curve_fit_retry_rate)
+                if self.debug_level > 0:
+                    print('Retry UnivariateSpline fit with increased s value.', this_s)
+
+            if sum(np.isnan(curve.pseudotimes_interp)) != 0:
+                raise ValueError("Principal curve fit fail. Increase curve_fit_retry_rate and retry. (default: 1.2)")
+
+            self.curves[l_idx] = curve
 
             if self.debug_plot_lineages:
                 cell_mask = np.logical_or.reduce(
