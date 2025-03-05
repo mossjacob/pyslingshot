@@ -192,6 +192,7 @@ class Slingshot:
                                  for l in range(len(self.lineages))]
             self.cell_weights = np.stack(self.cell_weights, axis=1)
 
+
         for epoch in tqdm(range(num_epochs)):
             # Calculate cell weights
             # cell weight is a matrix #cells x #lineages indicating cell-lineage assignment
@@ -298,7 +299,7 @@ class Slingshot:
                     self.data,
                     max_iter=1,
                     w=self.cell_weights[:, l_idx],
-                    s=this_s,
+                    param_s=this_s,
                 )
 
                 if sum(np.isnan(curve.pseudotimes_interp)) == 0:
