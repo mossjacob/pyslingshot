@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pyslingshot"
-version = "0.1.4"
+version = "0.1.5"
 description = "Python implementation of the Slingshot pseudotime algorithm"
 authors = ["Jacob Moss <cob.mossy@gmail.com>"]
 license = "MIT"

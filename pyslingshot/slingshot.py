@@ -10,7 +10,7 @@ from sklearn.neighbors import KernelDensity
 from collections import deque
 from tqdm.autonotebook import tqdm
 
-from .util import scale_to_range, mahalanobis, isint, isstr
+from .util import scale_to_range, mahalanobis, isint, isstr, infer_cluster_label_indices
 from .lineage import Lineage
 from .plotter import SlingshotPlotter
 
@@ -41,22 +41,16 @@ class Slingshot:
             assert celltype_key is not None, "Must provide celltype key if data is an AnnData object"
             cluster_labels = data.obs[celltype_key]
 
-            if isint(cluster_labels[0]):
-                cluster_max = cluster_labels.max()
-                self.cluster_label_indices = cluster_labels
-            elif isstr(cluster_labels[0]):
-                cluster_max = len(np.unique(cluster_labels))
-                # Convert list of str labels into a list of int indices
-                self.cluster_label_indices = np.array([np.where(np.unique(cluster_labels) == label)[0][0] for label in cluster_labels])
-            else:
-                raise ValueError("Unexpected cluster label dtype.")
-            cluster_labels_onehot = np.zeros((cluster_labels.shape[0], cluster_max + 1))
+            self.cluster_label_indices = infer_cluster_label_indices(cluster_labels)
+            cluster_labels_onehot = np.zeros((cluster_labels.shape[0], self.cluster_label_indices.max() + 1))
             cluster_labels_onehot[np.arange(cluster_labels.shape[0]), self.cluster_label_indices] = 1
 
             data = data.obsm[obsm_key]
         else:
             assert cluster_labels_onehot is not None, "Must provide cluster labels if data is not an AnnData object"
-            cluster_labels = self.cluster_labels_onehot.argmax(axis=1)
+            cluster_labels = cluster_labels_onehot.argmax(axis=1)
+            self.cluster_label_indices = infer_cluster_label_indices(cluster_labels)
+
         self.data = data
         self.cluster_labels_onehot = cluster_labels_onehot
         self.cluster_labels = cluster_labels
