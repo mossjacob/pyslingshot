@@ -3,7 +3,7 @@ name = "pyslingshot"
 version = "0.1.5"
 description = "Python implementation of the Slingshot pseudotime algorithm"
 authors = [{ name = "Jacob Moss", email = "cob.mossy@gmail.com" }]
-requires-python = "~=3.8"
+requires-python = ">=3.9"
 readme = "README.md"
 license = "MIT"
 dependencies = [
@@ -22,6 +22,9 @@ dependencies = [
 dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
 ]
 
 [project.urls]
@@ -55,7 +58,7 @@ ignore = [
 "__init__.py" = ["F401"]  # unused imports
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
