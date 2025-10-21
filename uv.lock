@@ -2777,17 +2777,19 @@ wheels = [
 
 [[package]]
 name = "pcurvepy2"
-version = "0.1.5"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
+    { name = "scikit-learn", version = "1.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "scipy", version = "1.13.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "scipy", version = "1.16.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6a/e3/3c270e28291d966f25f5f91090c1755102beef03c4bb70b9852a6f9e9997/pcurvepy2-0.1.5.tar.gz", hash = "sha256:1dba962626b1d77e587a29601c5a56715d932e027f668fd2ef44d4236a8524b0", size = 16278, upload-time = "2023-12-06T10:07:06.891Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b3/2c/02fad96d9d84e2aa6651726e13445e3ff02d5746e2bd24127024e9f68c2f/pcurvepy2-0.2.1.tar.gz", hash = "sha256:a49f026e939f3e4cffd04f807674f0d850c30108297baaf9621598d13f231cc2", size = 197652, upload-time = "2025-10-21T19:53:32.813Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c5/04/3731b42588bbfecb7cfe01692fc532a9d3e246b19935d36c55c517021408/pcurvepy2-0.1.5-py3-none-any.whl", hash = "sha256:30e0d62c5637c1b6287dfee12af33d27f6b31e01a7a1ef84c0b5e833fa47c702", size = 16897, upload-time = "2023-12-06T10:07:04.657Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/a9/bbb583f5e18a563fcb4f204be97ea482c4092d5edefcd0af8720f2ad55f4/pcurvepy2-0.2.1-py3-none-any.whl", hash = "sha256:b54983c2c8e967f18931172a5bb327c23a5480aafb4a5dc8c3abe6ae06c5cb7f", size = 17783, upload-time = "2025-10-21T19:53:30.542Z" },
 ]
 
 [[package]]
@@ -3195,7 +3197,7 @@ requires-dist = [
     { name = "networkx" },
     { name = "notebook" },
     { name = "numpy", specifier = ">=1.23.0,<2" },
-    { name = "pcurvepy2", specifier = "==0.1.5" },
+    { name = "pcurvepy2", specifier = ">=0.2.1" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
