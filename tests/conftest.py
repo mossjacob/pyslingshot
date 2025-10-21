@@ -60,18 +60,18 @@ def simple_data() -> tuple[np.ndarray, np.ndarray]:
     num_cells = 100
     num_clusters = 3
 
-    data = []
-    cluster_labels = []
+    data_list: list[np.ndarray] = []
+    cluster_labels_list: list[int] = []
 
     for k in range(num_clusters):
         # Create clusters at different positions
         center = np.array([k * 3.0, k * 2.0])
         cluster_data = np.random.randn(num_cells // num_clusters, 2) * 0.5 + center
-        data.append(cluster_data)
-        cluster_labels.extend([k] * (num_cells // num_clusters))
+        data_list.append(cluster_data)
+        cluster_labels_list.extend([k] * (num_cells // num_clusters))
 
-    data = np.vstack(data)
-    cluster_labels = np.array(cluster_labels)
+    data = np.vstack(data_list)
+    cluster_labels = np.array(cluster_labels_list)
 
     return data, cluster_labels
 

@@ -15,7 +15,7 @@ dependencies = [
     "notebook",
     "scikit-learn",
     "networkx",
-    "anndata",
+    "anndata>=0.10.9",
 ]
 
 [project.optional-dependencies]

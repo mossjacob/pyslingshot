@@ -3191,7 +3191,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anndata" },
+    { name = "anndata", specifier = ">=0.10.9" },
     { name = "matplotlib", specifier = ">=3.6.0,<4" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "networkx" },

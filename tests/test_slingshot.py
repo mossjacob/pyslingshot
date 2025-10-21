@@ -168,6 +168,7 @@ class TestFit:
 
         assert slingshot.curves is not None
         assert slingshot.cell_weights is not None
+        assert slingshot.lineages is not None
         assert len(slingshot.curves) == len(slingshot.lineages)
 
     def test_fit_multiple_epochs(self, anndata_1branch: AnnData):
@@ -181,6 +182,7 @@ class TestFit:
         slingshot.fit(num_epochs=2)
 
         assert slingshot.curves is not None
+        assert slingshot.lineages is not None
         assert len(slingshot.curves) == len(slingshot.lineages)
 
     def test_fit_simple_data(self, simple_data: tuple[np.ndarray, np.ndarray]):
@@ -272,6 +274,8 @@ class TestSaveLoadParams:
             assert slingshot2.curves is not None
             assert slingshot2.cell_weights is not None
             assert slingshot2.distances is not None
+            assert slingshot.curves is not None
+            assert slingshot.distances is not None
 
             # Verify loaded data matches original
             assert len(slingshot2.curves) == len(slingshot.curves)
