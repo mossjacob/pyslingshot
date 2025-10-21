@@ -63,7 +63,7 @@ class SlingshotPlotter:
                 cell_mask = np.logical_or.reduce(np.array([sling.cluster_label_indices == k for k in lineage]))
                 colors[cell_mask] = curve.pseudotimes_interp[cell_mask]
         elif type(color_mode) is np.ndarray:
-            colors = color_mode  # type: ignore[assignment]
+            colors = color_mode
         else:
             colors = "black"
 

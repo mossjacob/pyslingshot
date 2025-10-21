@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Any
 
 import numpy as np
 from anndata import AnnData
@@ -40,21 +39,28 @@ class Slingshot:
             is_debugging: whether to show debugging information and plots
         """
         if isinstance(data, AnnData):
-            assert celltype_key is not None, "Must provide celltype key if data is an AnnData object"
+            if celltype_key is None:
+                raise ValueError("Must provide celltype key if data is an AnnData object")
             cluster_labels: np.ndarray = data.obs[celltype_key]
 
             self.cluster_label_indices = infer_cluster_label_indices(cluster_labels)
             num_cells = cluster_labels.shape[0]
-            cluster_labels_onehot[np.arange(cluster_labels.shape[0]), self.cluster_label_indices] = 1
+            num_clusters = int(self.cluster_label_indices.max()) + 1
+            _cluster_labels_onehot = np.zeros((num_cells, num_clusters))
+            row_indices = np.arange(num_cells)
+            col_indices: np.ndarray = self.cluster_label_indices.astype(int)
+            _cluster_labels_onehot[row_indices, col_indices] = 1
 
             data = data.obsm[obsm_key]
         else:
-            assert cluster_labels_onehot is not None, "Must provide cluster labels if data is not an AnnData object"
+            if cluster_labels_onehot is None:
+                raise ValueError("Must provide cluster labels if data is not an AnnData object")
             cluster_labels = cluster_labels_onehot.argmax(axis=1)
+            _cluster_labels_onehot = cluster_labels_onehot
             self.cluster_label_indices = infer_cluster_label_indices(cluster_labels)
 
         self.data = data
-        self.cluster_labels_onehot = cluster_labels_onehot
+        self.cluster_labels_onehot = _cluster_labels_onehot
         self.cluster_labels = cluster_labels
         self.num_clusters = self.cluster_label_indices.max() + 1
         self.start_node = start_node
@@ -100,7 +106,7 @@ class Slingshot:
 
     def save_params(self, filepath: str) -> None:
         params = {"curves": self.curves, "cell_weights": self.cell_weights, "distances": self.distances}
-        np.save(filepath, params, allow_pickle=True)  # type: ignore[arg-type]
+        np.save(filepath, params, allow_pickle=True)
 
     def _set_debug_axes(self, axes: np.ndarray | None) -> None:
         self.debug_axes = axes
@@ -181,16 +187,32 @@ class Slingshot:
         self._tree = children
         return children
 
-    def fit(self, num_epochs: int = 10, debug_axes: Any = None) -> None:
+    def fit(self, num_epochs: int = 10, debug_axes: np.ndarray | None = None) -> None:
+        # Validate debug_axes shape if provided
+        if debug_axes is not None:
+            if debug_axes.shape != (2, 2):
+                raise ValueError(f"debug_axes must be a 2x2 grid of Axes, got shape {debug_axes.shape}")
+
         self._set_debug_axes(debug_axes)
-        if self.curves is None:  # Initial curves and pseudotimes:
+
+        # Initialize curves and cell weights if needed
+        if self.curves is None:
             self.get_lineages()
             self.construct_initial_curves()
-            self.cell_weights = [
-                self.cluster_labels_onehot[:, self.lineages[lineage_idx].clusters].sum(axis=1)
+
+            # After get_lineages() and construct_initial_curves(), these are guaranteed to be set
+            if self.lineages is None or self.cluster_labels_onehot is None:
+                raise RuntimeError("Failed to initialize lineages")
+
+            cell_weights_list = [
+                self.cluster_labels_onehot[:, [int(c) for c in self.lineages[lineage_idx].clusters]].sum(axis=1)
                 for lineage_idx in range(len(self.lineages))
             ]
-            self.cell_weights = np.stack(self.cell_weights, axis=1)
+            self.cell_weights = np.stack(cell_weights_list, axis=1)
+
+        # Validate required attributes are set
+        if self.lineages is None or self.curves is None or self.cell_weights is None:
+            raise RuntimeError("Slingshot must be initialized before fitting")
 
         for epoch in tqdm(range(num_epochs)):
             # Calculate cell weights
@@ -216,18 +238,20 @@ class Slingshot:
             self.debug_plot_avg = False
 
             if self.debug_axes is not None and epoch == num_epochs - 1:  # plot curves
-                self.plotter.clusters(self.debug_axes[1, 1], s=2, alpha=0.5)
-                self.plotter.curves(self.debug_axes[1, 1], self.curves)
+                ax = self._get_debug_ax(1, 1)
+                self.plotter.clusters(ax, s=2, alpha=0.5)
+                self.plotter.curves(ax, self.curves)
 
     def construct_initial_curves(self) -> None:
         """Constructs lineage principal curves using piecewise linear initialisation"""
-        piecewise_linear = list()
-        distances = list()
+        if self.lineages is None:
+            raise ValueError("Lineages must be initialised with `get_lineages()` before constructing initial curves.")
+        piecewise_linear = []
+        distances = []
 
-        for l_idx, lineage in enumerate(self.lineages):
+        for lineage in self.lineages:
             # Calculate piecewise linear path
             p = np.stack(self.cluster_centres[lineage.clusters])
-            s = np.zeros(p.shape[0])  # TODO
 
             cell_mask = np.logical_or.reduce(np.array([self.cluster_label_indices == k for k in lineage]))
             cells_involved = self.data[cell_mask]
@@ -237,7 +261,6 @@ class Slingshot:
             d_sq, dist = curve.project_to_curve(self.data, points=curve.points_interp[curve.order])
             distances.append(d_sq)
 
-            # piecewise_linear.append(PrincipalCurve.from_params(s, p))
             piecewise_linear.append(curve)
 
         self.curves = piecewise_linear
@@ -271,19 +294,20 @@ class Slingshot:
         self.lineages = lineages
         self.branch_clusters = branch_clusters
 
-        self.cluster_lineages = {k: list() for k in range(self.num_clusters)}
-        for l_idx, lineage in enumerate(self.lineages):
+        self.cluster_lineages = {k: [] for k in range(self.num_clusters)}
+        for l_idx, lineage in enumerate(lineages):
             for k in lineage:
                 self.cluster_lineages[k].append(l_idx)
 
-        if self.debug_level > 0:
+        if self.is_debugging:
             print("Lineages:", lineages)
 
-    def fit_lineage_curves(self):
+    def fit_lineage_curves(self) -> None:
         """Updates curve using a cubic spline and projection of data"""
         assert self.lineages is not None
         assert self.curves is not None
-        distances = list()
+        assert self.cell_weights is not None
+        distances: list[np.ndarray] = []
 
         # Calculate principal curves
         for l_idx, lineage in enumerate(self.lineages):
@@ -294,83 +318,159 @@ class Slingshot:
             # that are not associated with the lineage.
             curve.fit(self.data, max_iter=1, w=self.cell_weights[:, l_idx])
 
-            if self.debug_plot_lineages:
+            if self.debug_plot_lineages and self.debug_axes is not None:
+                ax = self._get_debug_ax(0, 1)
                 cell_mask = np.logical_or.reduce(np.array([self.cluster_label_indices == k for k in lineage]))
                 cells_involved = self.data[cell_mask]
-                self.debug_axes[0, 1].scatter(cells_involved[:, 0], cells_involved[:, 1], s=2, alpha=0.5)
+                ax.scatter(cells_involved[:, 0], cells_involved[:, 1], s=2, alpha=0.5)
                 alphas = curve.pseudotimes_interp
                 alphas = (alphas - alphas.min()) / (alphas.max() - alphas.min())
                 for i in np.random.permutation(self.data.shape[0])[:50]:
                     path_from = (self.data[i][0], curve.points_interp[i][0])
                     path_to = (self.data[i][1], curve.points_interp[i][1])
-                    self.debug_axes[0, 1].plot(path_from, path_to, c='black', alpha=alphas[i])
-                self.debug_axes[0, 1].plot(curve.points_interp[curve.order, 0],
-                                           curve.points_interp[curve.order, 1], label=str(lineage))
+                    ax.plot(path_from, path_to, c="black", alpha=alphas[i])
+                ax.plot(curve.points_interp[curve.order, 0], curve.points_interp[curve.order, 1], label=str(lineage))
 
             d_sq, dist = curve.project_to_curve(self.data, curve.points_interp[curve.order])
             distances.append(d_sq)
         self.distances = distances
-        if self.debug_plot_lineages:
-            self.debug_axes[0, 1].legend()
+        if self.debug_plot_lineages and self.debug_axes is not None:
+            ax = self._get_debug_ax(0, 1)
+            ax.legend()
 
-    def calculate_cell_weights(self):
-        """TODO: annotate, this is a translation from R"""
-        cell_weights = [
-            self.cluster_labels_onehot[:, self.lineages[lineage_idx].clusters].sum(axis=1)
+    def calculate_cell_weights(self) -> None:
+        """Calculate soft assignment weights for cells to lineages.
+
+        This implements a probabilistic weighting scheme that assigns cells to multiple
+        lineages based on their proximity to each lineage path. The algorithm:
+
+        1. Initializes weights based on cluster membership (cells get weight 1 for lineages
+           containing their cluster, 0 otherwise)
+        2. Converts distances to percentile ranks to create a normalized distance metric
+        3. Transforms percentile ranks into weights using 1 - rank^2
+        4. Normalizes weights so the maximum weight per cell is 1
+        5. Applies reassignment rules:
+           - Cells very close to a lineage (rank < 0.5) get full weight (1.0)
+           - Cells far from a lineage (rank > 0.9) with low weight (<0.1) get zero weight
+
+        The result is a soft assignment where each cell can belong to multiple lineages
+        with varying degrees of membership, enabling smooth transitions at branch points.
+
+        This is a translation from the R version, with the following variable name clarifications:
+          - cell_weights → initial_weights (Step 1)
+          - d_sq → lineage_distances
+          - d_ord → sorted_distance_indices
+          - w_prob → weight_probabilities
+          - w_rnk_d → cumulative_weight_ranks
+          - z → distance_percentiles
+          - z_prime → weight_scores
+          - w0 → initial_weights_backup
+          - z0 → percentiles_to_reassign
+          - ridx → cells_to_reassign_mask
+          - reassign → reassign_enabled
+        """
+        assert self.lineages is not None
+        assert self.distances is not None
+
+        # Step 1: Initialize weights based on cluster membership
+        # For each lineage, sum the one-hot cluster indicators for clusters in that lineage
+        # This gives binary weights: 1 if cell's cluster is in the lineage, 0 otherwise
+        initial_weights_list = [
+            self.cluster_labels_onehot[:, [int(c) for c in self.lineages[lineage_idx].clusters]].sum(axis=1)
             for lineage_idx in range(len(self.lineages))
         ]
-        cell_weights = np.stack(cell_weights, axis=1)
+        initial_weights = np.stack(initial_weights_list, axis=1)  # shape: (num_cells, num_lineages)
 
-        d_sq = np.stack(self.distances, axis=1)
-        d_ord = np.argsort(d_sq, axis=None)
-        w_prob = cell_weights / cell_weights.sum(axis=1, keepdims=True)  # shape (cells, lineages)
-        w_rnk_d = np.cumsum(w_prob.reshape(-1)[d_ord]) / w_prob.sum()
+        # Step 2: Prepare distance matrix and compute distance-based percentile ranks
+        # distances is a list of arrays (one per lineage), stack into single matrix
+        lineage_distances = np.stack(self.distances, axis=1)  # shape: (num_cells, num_lineages)
 
-        z = d_sq
-        z_shape = z.shape
-        z = z.reshape(-1)
-        z[d_ord] = w_rnk_d
-        z = z.reshape(z_shape)
-        z_prime = 1 - z**2
-        z_prime[cell_weights == 0] = np.nan
-        w0 = cell_weights.copy()
-        cell_weights = z_prime / np.nanmax(z_prime, axis=1, keepdims=True)  # rowMins(D) / D
-        np.nan_to_num(cell_weights, nan=1, copy=False)  # handle 0/0
-        # cell_weights[is.na(cell_weights)] <- 0
+        # Get indices that would sort all distances (flattened) in ascending order
+        sorted_distance_indices = np.argsort(lineage_distances, axis=None)
+
+        # Convert binary weights to probability distribution (normalize per cell)
+        weight_probabilities = initial_weights / initial_weights.sum(axis=1, keepdims=True)
+
+        # Compute cumulative weight distribution in order of increasing distance
+        # This creates a percentile rank for each distance value, weighted by initial cluster assignment
+        cumulative_weight_ranks = np.cumsum(weight_probabilities.reshape(-1)[sorted_distance_indices])
+        cumulative_weight_ranks = cumulative_weight_ranks / weight_probabilities.sum()
+
+        # Step 3: Map distances to their percentile ranks
+        # Replace each distance value with its weighted percentile rank (0 to 1)
+        distance_percentiles = lineage_distances.copy()
+        original_shape = distance_percentiles.shape
+        distance_percentiles = distance_percentiles.reshape(-1)
+        distance_percentiles[sorted_distance_indices] = cumulative_weight_ranks
+        distance_percentiles = distance_percentiles.reshape(original_shape)
+
+        # Step 4: Transform percentile ranks into weight scores
+        # Use 1 - rank^2 transformation (quadratic decay from 1 to 0)
+        weight_scores = 1 - distance_percentiles**2
+
+        # Set weight to NaN for lineages that don't contain the cell's cluster
+        weight_scores[initial_weights == 0] = np.nan
+
+        # Backup initial weights for later validation
+        initial_weights_backup = initial_weights.copy()
+
+        # Step 5: Normalize weights so maximum weight per cell is 1
+        cell_weights = weight_scores / np.nanmax(weight_scores, axis=1, keepdims=True)
+
+        # Handle edge case: cells equidistant from all lineages (0/0 = NaN)
+        # Give such cells weight 1 for all lineages
+        np.nan_to_num(cell_weights, nan=1, copy=False)
+
+        # Clamp weights to valid range [0, 1]
         cell_weights[cell_weights > 1] = 1
         cell_weights[cell_weights < 0] = 0
-        cell_weights[w0 == 0] = 0
 
-        reassign = True
-        if reassign:
-            # add if z < .5
-            cell_weights[z < 0.5] = 1  # (rowMins(D) / D)[idx]
+        # Ensure cells get 0 weight for lineages they weren't initially assigned to
+        cell_weights[initial_weights_backup == 0] = 0
 
-            # drop if z > .9 and cell_weights < .1
-            ridx = (z.max(axis=1) > 0.9) & (cell_weights.min(axis=1) < 0.1)
-            w0 = cell_weights[ridx]
-            z0 = z[ridx]
-            w0[(z0 > 0.9) & (w0 < 0.1)] = 0  # !is.na(Z0) & Z0 > .9 & W0 < .1
-            cell_weights[ridx] = w0
+        # Step 6: Apply reassignment rules for cells near branch points
+        reassign_enabled = True
+        if reassign_enabled:
+            # Rule 1: Cells very close to a lineage (low percentile rank) get full weight
+            # If distance percentile < 0.5, set weight to 1 (cell is definitively on this lineage)
+            cell_weights[distance_percentiles < 0.5] = 1
+
+            # Rule 2: Remove weak assignments for cells far from all lineages
+            # Identify cells where: max distance percentile > 0.9 AND min weight < 0.1
+            # These are cells that are far from all lineages but have a spurious weak assignment
+            cells_to_reassign_mask = (distance_percentiles.max(axis=1) > 0.9) & (cell_weights.min(axis=1) < 0.1)
+
+            # For these cells, zero out any lineage weight where distance > 0.9 and weight < 0.1
+            weights_to_reassign = cell_weights[cells_to_reassign_mask]
+            percentiles_to_reassign = distance_percentiles[cells_to_reassign_mask]
+            weights_to_reassign[(percentiles_to_reassign > 0.9) & (weights_to_reassign < 0.1)] = 0
+            cell_weights[cells_to_reassign_mask] = weights_to_reassign
 
         self.cell_weights = cell_weights
 
-    def avg_curves(self):
+    def avg_curves(
+        self,
+    ) -> tuple[list[dict[PrincipalCurve, np.ndarray]], dict[int, set[PrincipalCurve]], dict[int, PrincipalCurve]]:
         """
         Starting at leaves, calculate average curves for each branch
 
         :return: shrinkage_percentages, cluster_children, cluster_avg_curves
         """
-        cell_weights = self.cell_weights
-        shrinkage_percentages = list()
-        cluster_children = dict()  # maps cluster to children
-        lineage_avg_curves = dict()
-        cluster_avg_curves = dict()
+        assert self.curves is not None
+        assert self.branch_clusters is not None
+        assert self.cluster_lineages is not None
+        assert self.cell_weights is not None
+
+        shrinkage_percentages: list[dict[PrincipalCurve, np.ndarray]] = []
+        cluster_children: dict[int, set[PrincipalCurve]] = {}
+        lineage_avg_curves: dict[int, PrincipalCurve] = {}
+        cluster_avg_curves: dict[int, PrincipalCurve] = {}
         branch_clusters = self.branch_clusters.copy()
-        if self.debug_level > 0:
+        if self.is_debugging:
             print("Reversing from leaf to root")
-        if self.debug_plot_avg:
-            self.plotter.clusters(self.debug_axes[1, 0], s=4, alpha=0.4)
+        if self.debug_plot_avg and self.debug_axes is not None:
+            ax = self._get_debug_ax(1, 0)
+            self.plotter.clusters(ax, s=4, alpha=0.4)
 
         while len(branch_clusters) > 0:
             # Starting at leaves, find lineages involved in branch
@@ -396,7 +496,7 @@ class Slingshot:
             # Calculate shrinkage weights using areas where cells share lineages
             # note that this also captures cells in average curves, since the
             # lineages which are averaged are present in branch_lineages
-            common = cell_weights[:, branch_lineages] > 0
+            common = self.cell_weights[:, branch_lineages] > 0
             common_mask = common.mean(axis=1) == 1.0
             shrinkage_percent: dict[PrincipalCurve, np.ndarray] = {}
             for curve in branch_curves:
@@ -429,11 +529,17 @@ class Slingshot:
             #             return(pij)
             #         })
             # }
-        if self.debug_plot_avg:
-            self.debug_axes[1, 0].legend()
+        if self.debug_plot_avg and self.debug_axes is not None:
+            ax = self._get_debug_ax(1, 0)
+            ax.legend()
         return shrinkage_percentages, cluster_children, cluster_avg_curves
 
-    def shrink_curves(self, cluster_children, shrinkage_percentages, cluster_avg_curves):
+    def shrink_curves(
+        self,
+        cluster_children: dict[int, set[PrincipalCurve]],
+        shrinkage_percentages: list[dict[PrincipalCurve, np.ndarray]],
+        cluster_avg_curves: dict[int, PrincipalCurve],
+    ) -> None:
         """
         Starting at root, shrink curves for each branch
 
@@ -443,6 +549,7 @@ class Slingshot:
             cluster_avg_curves:
         :return:
         """
+        assert self.branch_clusters is not None
         branch_clusters = self.branch_clusters.copy()
         while len(branch_clusters) > 0:
             # Starting at root, find lineages involves in branch
@@ -450,7 +557,7 @@ class Slingshot:
             shrinkage_percent = shrinkage_percentages.pop()
             branch_curves = list(cluster_children[k])
             cluster_avg_curve = cluster_avg_curves[k]
-            if self.is_debugging > 0:
+            if self.is_debugging:
                 print(f"Shrinking branch @{k} with curves:", branch_curves)
 
             # Specify the avg curve for this branch
@@ -537,9 +644,10 @@ class Slingshot:
 
         # 1. Interpolate all the lineages over the shared time domain
         branch_s_interps = np.stack([c.pseudotimes_interp for c in branch_curves], axis=1)
-        max_shared_pseudotime = branch_s_interps.max(axis=0).min()  # take minimum of maximum pseudotimes for each lineage
+        # Take minimum of maximum pseudotimes for each lineage
+        max_shared_pseudotime = branch_s_interps.max(axis=0).min()
         combined_pseudotime = np.linspace(0, max_shared_pseudotime, num_cells)
-        curves_dense = list()
+        curves_dense_list: list[np.ndarray] = []
         for curve in branch_curves:
             lineage_curve = np.zeros((combined_pseudotime.shape[0], num_dims_reduced))
             order = curve.order
@@ -551,25 +659,28 @@ class Slingshot:
                     assume_sorted=True,
                 )
                 lineage_curve[:, j] = lin_interpolator(combined_pseudotime)
-            curves_dense.append(lineage_curve)
+            curves_dense_list.append(lineage_curve)
 
-        curves_dense = np.stack(curves_dense, axis=1)  # (n, L_b, J)
+        curves_dense = np.stack(curves_dense_list, axis=1)  # (n, L_b, J)
 
         # 2. Average over these curves and project the data onto the result
         avg = curves_dense.mean(axis=1)  # avg is already "sorted"
         avg_curve = PrincipalCurve()
         avg_curve.project_to_curve(self.data, points=avg)
         # avg_curve.pseudotimes_interp -= avg_curve.pseudotimes_interp.min()
-        if self.debug_plot_avg:
-            self.debug_axes[1, 0].plot(avg[:, 0], avg[:, 1], c='blue', linestyle='--', label='average', alpha=0.7)
+        if self.debug_plot_avg and self.debug_axes is not None:
+            ax = self._get_debug_ax(1, 0)
+            ax.plot(avg[:, 0], avg[:, 1], c="blue", linestyle="--", label="average", alpha=0.7)
             _, p_interp, order = avg_curve.unpack_params()
-            self.debug_axes[1, 0].plot(p_interp[order, 0], p_interp[order, 1], c='red', label='data projected', alpha=0.7)
+            ax.plot(p_interp[order, 0], p_interp[order, 1], c="red", label="data projected", alpha=0.7)
 
         # avg.curve$w <- rowSums(vapply(pcurves, function(p){ p$w }, rep(0,nrow(X))))
         return avg_curve
 
     @property
     def unified_pseudotime(self) -> np.ndarray:
+        assert self.curves is not None
+        assert self.lineages is not None
         pseudotime = np.zeros_like(self.curves[0].pseudotimes_interp)
         for l_idx, lineage in enumerate(self.lineages):
             curve = self.curves[l_idx]
