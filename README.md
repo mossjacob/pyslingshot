@@ -1,17 +1,17 @@
 # Slingshot in Python
 
-This is a Python implementation of the Slingshot pseudotime algorithm (Street et al., 2018). 
+This is a Python implementation of the Slingshot pseudotime algorithm (Street et al., 2018).
 The original implementation is written in R: https://github.com/kstreet13/slingshot.
 
 A complete working example is located in `slingshot.ipynb`, using a synthetically generated dataset.
 
-## Installation: 
+## Installation:
 
 - `pip install pyslingshot`
 
 
 ### Deprecated version
-Older versions if pyslingshot (before v0.1.0) requires manually installing `numpy`, `scipy`, `sklearn`, and my fork 
+Older versions if pyslingshot (before v0.1.0) requires manually installing `numpy`, `scipy`, `sklearn`, and my fork
 of `pcurvepy` (https://github.com/mossjacob/pcurvepy).
 
 
