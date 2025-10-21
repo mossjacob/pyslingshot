@@ -3160,7 +3160,7 @@ wheels = [
 
 [[package]]
 name = "pyslingshot"
-version = "0.1.5"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "anndata", version = "0.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },

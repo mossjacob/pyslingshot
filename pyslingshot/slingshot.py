@@ -26,6 +26,7 @@ class Slingshot:
         start_node: int = 0,
         end_nodes: list[int] | None = None,
         is_debugging: bool = False,
+        approx_points: int | None = None,
     ) -> None:
         """
         Constructs a new `Slingshot` object.
@@ -37,6 +38,7 @@ class Slingshot:
             start_node: the starting node of the minimum spanning tree
             end_nodes: any terminal nodes
             is_debugging: whether to show debugging information and plots
+            approx_points: number of approximate points to use when fitting the principal curves
         """
         if isinstance(data, AnnData):
             if celltype_key is None:
@@ -60,6 +62,7 @@ class Slingshot:
             self.cluster_label_indices = infer_cluster_label_indices(cluster_labels)
 
         self.data = data
+        self.approx_points = approx_points
         self.cluster_labels_onehot = _cluster_labels_onehot
         self.cluster_labels = cluster_labels
         self.num_clusters = self.cluster_label_indices.max() + 1
@@ -311,12 +314,12 @@ class Slingshot:
 
         # Calculate principal curves
         for l_idx, lineage in enumerate(self.lineages):
-            curve = self.curves[l_idx]
+            curve: PrincipalCurve = self.curves[l_idx]
 
             # Fit principal curve through data
             # Weights are important as they effectively silence points
             # that are not associated with the lineage.
-            curve.fit(self.data, max_iter=1, w=self.cell_weights[:, l_idx])
+            curve.fit(self.data, max_iter=1, w=self.cell_weights[:, l_idx], approx_points=self.approx_points)
 
             if self.debug_plot_lineages and self.debug_axes is not None:
                 ax = self._get_debug_ax(0, 1)
