@@ -319,7 +319,7 @@ class Slingshot:
             # Fit principal curve through data
             # Weights are important as they effectively silence points
             # that are not associated with the lineage.
-            curve.fit(self.data, max_iter=1, w=self.cell_weights[:, l_idx], approx_points=self.approx_points)
+            curve.fit(self.data, max_iter=1, weights=self.cell_weights[:, l_idx], approx_points=self.approx_points)
 
             if self.debug_plot_lineages and self.debug_axes is not None:
                 ax = self._get_debug_ax(0, 1)
